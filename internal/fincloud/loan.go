@@ -65,10 +65,10 @@ type loanDTO struct {
 	} `json:"jadwalangsuran"`
 	Repayments []struct {
 		Date          string `json:"tglbayar"`
-		Principal     scalar `json:"bayarpokok"`
-		Interest      scalar `json:"bayarbunga"`
-		Penalty       scalar `json:"bayardenda"`
-		EarlyPenalty  scalar `json:"bayardendapelunasan"`
+		Principal     scalar `json:"bayar_pokok"`
+		Interest      scalar `json:"bayar_bunga"`
+		Penalty       scalar `json:"bayar_denda"`
+		EarlyPenalty  scalar `json:"bayar_dendapelunasan"`
 		DWP           scalar `json:"nominaldwp"`
 		Total         scalar `json:"totalbayar"`
 		JournalNumber string `json:"nojurnal"`

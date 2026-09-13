@@ -76,6 +76,29 @@ func TestClientPreservesConfiguredBasePath(t *testing.T) {
 	}
 }
 
+func TestGetLoanDecodesRepaymentUnderscoreFields(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/admin/access/login" {
+			_, _ = io.WriteString(writer, `{"status":"ok","data":{"result":{"sessionid":"session"}}}`)
+			return
+		}
+		_, _ = io.WriteString(writer, `{"status":"ok","data":{"result":{"id":"primary","plafondlimit":"1200","jangkawaktu":"1 bulan","bungaflat":"12","historybayar":[{"tglbayar":"2026-01-02","bayar_pokok":"100","bayar_bunga":"20","bayar_denda":"3","bayar_dendapelunasan":"4","nominaldwp":"5","totalbayar":"132","nojurnal":"J-1"}]}}}`)
+	}))
+	defer server.Close()
+	client := newTestClient(t, server)
+	result, err := client.GetLoan(context.Background(), "primary", testJakarta())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(result.Repayments) != 1 {
+		t.Fatalf("repayments = %d", len(result.Repayments))
+	}
+	repayment := result.Repayments[0]
+	if repayment.PrincipalComponent.Format(2) != "100.00" || repayment.InterestComponent.Format(2) != "20.00" || repayment.PenaltyComponent.Format(2) != "3.00" || repayment.EarlyPenaltyComponent.Format(2) != "4.00" || repayment.DWPComponent.Format(2) != "5.00" || repayment.TotalPayment.Format(2) != "132.00" || repayment.JournalNumber != "J-1" {
+		t.Fatalf("repayment = %+v", repayment)
+	}
+}
+
 func TestClientDistinguishesCredentialRejectionFromNetworkFailure(t *testing.T) {
 	t.Run("credentials", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {
