@@ -73,14 +73,23 @@ func (service *Service) GetLoanPosition(ctx context.Context, account string, asO
 	if primary == "" {
 		return loan.ResolvedPosition{}, fmt.Errorf("%w: resolved primary account is empty", loan.ErrInvariant)
 	}
+	alternate := strings.TrimSpace(contract.AlternateAccount)
+	if alternate == "" {
+		return loan.ResolvedPosition{}, fmt.Errorf("%w: resolved alternate MSO account is empty", loan.ErrHistoricalEvidence)
+	}
+	msoAccount := formatFincloudAltNoToMSO(alternate)
 	if asOf.Before(service.cutoff) {
-		position, err := service.mso.HistoricalPosition(ctx, primary, asOf)
+		position, err := service.mso.HistoricalPosition(ctx, msoAccount, asOf)
+		if err == nil {
+			position.AccountNumber = primary
+		}
 		return loan.ResolvedPosition{Loan: contract, Position: position}, err
 	}
-	opening, err := service.mso.OpeningState(ctx, primary, service.cutoff)
+	opening, err := service.mso.OpeningState(ctx, msoAccount, service.cutoff)
 	if err != nil {
 		return loan.ResolvedPosition{}, err
 	}
+	opening.AccountNumber = primary
 	if asOf.Equal(service.cutoff) {
 		return loan.ResolvedPosition{Loan: contract, Position: openingPosition(opening, asOf)}, nil
 	}
@@ -121,6 +130,14 @@ func (service *Service) GetLoanPosition(ctx context.Context, account string, asO
 		CollectabilityBI: calculation.CollectabilityBI, UnappliedAmount: calculation.UnappliedAmount, Source: loan.SourceReconstructed,
 	}
 	return loan.ResolvedPosition{Loan: contract, Position: position, Trace: calculation.Trace}, nil
+}
+
+func formatFincloudAltNoToMSO(account string) string {
+	account = strings.TrimSpace(account)
+	if len(account) != 10 {
+		return account
+	}
+	return account[:2] + "." + account[2:5] + "." + account[5:]
 }
 
 func (service *Service) exactPosition(ctx context.Context, account string, asOf, today loan.Date) (loan.LoanPosition, error) {
