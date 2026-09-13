@@ -53,6 +53,29 @@ func TestClientInitialLoginReuseAndOneSessionRetry(t *testing.T) {
 	}
 }
 
+func TestClientPreservesConfiguredBasePath(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/fincloud-taspen-web/admin/access/login":
+			_, _ = io.WriteString(writer, `{"status":"ok","data":{"result":{"sessionid":"session"}}}`)
+		case "/fincloud-taspen-web/pinjaman/inquiry/rekening/pinjaman":
+			writeLoan(writer, request.URL.Query().Get("id"))
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	client, err := NewClient(Config{
+		BaseURL: server.URL + "/fincloud-taspen-web", Username: "system", Password: "secret", LocationID: "000", RoleID: "R-1", HTTPClient: server.Client(),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := client.GetLoan(context.Background(), "primary", testJakarta()); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestClientDistinguishesCredentialRejectionFromNetworkFailure(t *testing.T) {
 	t.Run("credentials", func(t *testing.T) {
 		server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, _ *http.Request) {

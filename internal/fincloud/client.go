@@ -212,11 +212,7 @@ func (client *Client) do(ctx context.Context, limit int64, build requestBuilder)
 }
 
 func (client *Client) newRequest(ctx context.Context, method, path string, query url.Values, body io.Reader) (*http.Request, error) {
-	reference, err := url.Parse(path)
-	if err != nil {
-		return nil, fmt.Errorf("build Fincloud URL: %w", err)
-	}
-	target := client.baseURL.ResolveReference(reference)
+	target := client.baseURL.JoinPath(path)
 	if query != nil {
 		target.RawQuery = query.Encode()
 	}
