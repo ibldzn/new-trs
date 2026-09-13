@@ -1,6 +1,6 @@
 package securityctx
 
-import "github.com/ibldzn/go-admin/internal/access"
+import "github.com/ibldzn/trs/internal/access"
 
 type Identity struct {
 	UserID   uint64

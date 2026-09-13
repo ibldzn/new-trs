@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ibldzn/go-admin/internal/platform/pagination"
+	"github.com/ibldzn/trs/internal/platform/pagination"
 )
 
 const UserPageSize = 20

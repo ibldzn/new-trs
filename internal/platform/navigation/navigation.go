@@ -5,7 +5,7 @@ import (
 	"net/url"
 	"strings"
 
-	"github.com/ibldzn/go-admin/internal/access"
+	"github.com/ibldzn/trs/internal/access"
 )
 
 type MatchMode string

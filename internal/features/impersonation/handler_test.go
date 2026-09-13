@@ -11,15 +11,15 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
-	"github.com/ibldzn/go-admin/internal/access"
-	"github.com/ibldzn/go-admin/internal/audit"
-	"github.com/ibldzn/go-admin/internal/auth"
-	"github.com/ibldzn/go-admin/internal/browserauth"
-	"github.com/ibldzn/go-admin/internal/platform/adminshell"
-	"github.com/ibldzn/go-admin/internal/platform/navigation"
-	"github.com/ibldzn/go-admin/internal/render"
-	"github.com/ibldzn/go-admin/internal/user"
-	webfiles "github.com/ibldzn/go-admin/web"
+	"github.com/ibldzn/trs/internal/access"
+	"github.com/ibldzn/trs/internal/audit"
+	"github.com/ibldzn/trs/internal/auth"
+	"github.com/ibldzn/trs/internal/browserauth"
+	"github.com/ibldzn/trs/internal/platform/adminshell"
+	"github.com/ibldzn/trs/internal/platform/navigation"
+	"github.com/ibldzn/trs/internal/render"
+	"github.com/ibldzn/trs/internal/user"
+	webfiles "github.com/ibldzn/trs/web"
 )
 
 type fakeLifecycle struct {

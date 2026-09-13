@@ -12,8 +12,8 @@ import (
 
 	"github.com/pressly/goose/v3"
 
-	"github.com/ibldzn/go-admin/internal/config"
-	"github.com/ibldzn/go-admin/internal/database"
+	"github.com/ibldzn/trs/internal/config"
+	"github.com/ibldzn/trs/internal/database"
 )
 
 const migrationDirectory = "migrations"

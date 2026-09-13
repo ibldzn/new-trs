@@ -7,10 +7,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/ibldzn/go-admin/internal/auth"
-	"github.com/ibldzn/go-admin/internal/browserauth"
-	"github.com/ibldzn/go-admin/internal/platform/adminshell"
-	"github.com/ibldzn/go-admin/internal/platform/webutil"
+	"github.com/ibldzn/trs/internal/auth"
+	"github.com/ibldzn/trs/internal/browserauth"
+	"github.com/ibldzn/trs/internal/platform/adminshell"
+	"github.com/ibldzn/trs/internal/platform/webutil"
 )
 
 const maxFormBody = 32 << 10

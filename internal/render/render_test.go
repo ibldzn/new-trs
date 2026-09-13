@@ -6,8 +6,8 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/ibldzn/go-admin/internal/render"
-	webfiles "github.com/ibldzn/go-admin/web"
+	"github.com/ibldzn/trs/internal/render"
+	webfiles "github.com/ibldzn/trs/web"
 )
 
 func TestRendererParsesEmbeddedAndDevelopmentTrees(t *testing.T) {

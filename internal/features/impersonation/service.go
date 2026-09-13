@@ -6,11 +6,11 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ibldzn/go-admin/internal/access"
-	"github.com/ibldzn/go-admin/internal/audit"
-	"github.com/ibldzn/go-admin/internal/auth"
-	"github.com/ibldzn/go-admin/internal/browserauth"
-	"github.com/ibldzn/go-admin/internal/user"
+	"github.com/ibldzn/trs/internal/access"
+	"github.com/ibldzn/trs/internal/audit"
+	"github.com/ibldzn/trs/internal/auth"
+	"github.com/ibldzn/trs/internal/browserauth"
+	"github.com/ibldzn/trs/internal/user"
 )
 
 type userStore interface {

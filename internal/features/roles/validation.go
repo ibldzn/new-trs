@@ -6,8 +6,8 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/ibldzn/go-admin/internal/access"
-	"github.com/ibldzn/go-admin/internal/user"
+	"github.com/ibldzn/trs/internal/access"
+	"github.com/ibldzn/trs/internal/user"
 )
 
 var roleSlugPattern = regexp.MustCompile(`^[a-z0-9]+(?:[-_][a-z0-9]+)*$`)

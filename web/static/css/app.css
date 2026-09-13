@@ -435,6 +435,9 @@
     width: calc(var(--spacing) * 10);
     height: calc(var(--spacing) * 10);
   }
+  .h-3 {
+    height: calc(var(--spacing) * 3);
+  }
   .h-16 {
     height: calc(var(--spacing) * 16);
   }
@@ -544,6 +547,11 @@
     margin-block-start: calc(calc(var(--spacing) * 3) * var(--tw-space-y-reverse));
     margin-block-end: calc(calc(var(--spacing) * 3) * calc(1 - var(--tw-space-y-reverse)));
   }
+  :where(.space-y-4 > :not(:last-child)) {
+    --tw-space-y-reverse: 0;
+    margin-block-start: calc(calc(var(--spacing) * 4) * var(--tw-space-y-reverse));
+    margin-block-end: calc(calc(var(--spacing) * 4) * calc(1 - var(--tw-space-y-reverse)));
+  }
   :where(.space-y-5 > :not(:last-child)) {
     --tw-space-y-reverse: 0;
     margin-block-start: calc(calc(var(--spacing) * 5) * var(--tw-space-y-reverse));
@@ -624,8 +632,14 @@
   .border-emerald-200 {
     border-color: var(--color-emerald-200);
   }
+  .border-emerald-300 {
+    border-color: var(--color-emerald-300);
+  }
   .border-red-200 {
     border-color: var(--color-red-200);
+  }
+  .border-red-300 {
+    border-color: var(--color-red-300);
   }
   .border-slate-200 {
     border-color: var(--color-slate-200);
@@ -1117,6 +1131,12 @@
     .sm\:grid-cols-2 {
       grid-template-columns: repeat(2, minmax(0, 1fr));
     }
+    .sm\:grid-cols-\[1fr_12rem_auto\] {
+      grid-template-columns: 1fr 12rem auto;
+    }
+    .sm\:grid-cols-\[12rem_1fr_auto\] {
+      grid-template-columns: 12rem 1fr auto;
+    }
     .sm\:flex-row {
       flex-direction: row;
     }
@@ -1140,6 +1160,11 @@
     }
     .sm\:px-6 {
       padding-inline: calc(var(--spacing) * 6);
+    }
+  }
+  @media (width >= 48rem) {
+    .md\:grid-cols-2 {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
   }
   @media (width >= 64rem) {
@@ -1170,6 +1195,9 @@
     .xl\:grid-cols-3 {
       grid-template-columns: repeat(3, minmax(0, 1fr));
     }
+    .xl\:grid-cols-4 {
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+    }
   }
   :where(.dark\:divide-slate-800:where(.dark, .dark *) > :not(:last-child)) {
     border-color: var(--color-slate-800);
@@ -1182,6 +1210,9 @@
   }
   .dark\:border-emerald-800:where(.dark, .dark *) {
     border-color: var(--color-emerald-800);
+  }
+  .dark\:border-emerald-900:where(.dark, .dark *) {
+    border-color: var(--color-emerald-900);
   }
   .dark\:border-red-900:where(.dark, .dark *) {
     border-color: var(--color-red-900);
@@ -1299,6 +1330,9 @@
   }
   .dark\:text-emerald-400:where(.dark, .dark *) {
     color: var(--color-emerald-400);
+  }
+  .dark\:text-red-200:where(.dark, .dark *) {
+    color: var(--color-red-200);
   }
   .dark\:text-red-300:where(.dark, .dark *) {
     color: var(--color-red-300);

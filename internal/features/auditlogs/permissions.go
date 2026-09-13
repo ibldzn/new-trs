@@ -1,6 +1,6 @@
 package auditlogs
 
-import "github.com/ibldzn/go-admin/internal/access"
+import "github.com/ibldzn/trs/internal/access"
 
 const PermissionView = "audit.view"
 

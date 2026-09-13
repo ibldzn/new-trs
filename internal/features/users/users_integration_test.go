@@ -12,15 +12,15 @@ import (
 
 	"github.com/jmoiron/sqlx"
 
-	"github.com/ibldzn/go-admin/internal/access"
-	"github.com/ibldzn/go-admin/internal/audit"
-	"github.com/ibldzn/go-admin/internal/auth"
-	"github.com/ibldzn/go-admin/internal/features/auditlogs"
-	"github.com/ibldzn/go-admin/internal/features/dashboard"
-	featureRoles "github.com/ibldzn/go-admin/internal/features/roles"
-	"github.com/ibldzn/go-admin/internal/securityctx"
-	"github.com/ibldzn/go-admin/internal/testutil/integrationdb"
-	"github.com/ibldzn/go-admin/internal/user"
+	"github.com/ibldzn/trs/internal/access"
+	"github.com/ibldzn/trs/internal/audit"
+	"github.com/ibldzn/trs/internal/auth"
+	"github.com/ibldzn/trs/internal/features/auditlogs"
+	"github.com/ibldzn/trs/internal/features/dashboard"
+	featureRoles "github.com/ibldzn/trs/internal/features/roles"
+	"github.com/ibldzn/trs/internal/securityctx"
+	"github.com/ibldzn/trs/internal/testutil/integrationdb"
+	"github.com/ibldzn/trs/internal/user"
 )
 
 func integrationDefinitions() []access.PermissionDefinition {

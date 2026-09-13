@@ -15,12 +15,12 @@ import (
 	"github.com/joho/godotenv"
 	"github.com/pressly/goose/v3"
 
-	"github.com/ibldzn/go-admin/internal/access"
-	"github.com/ibldzn/go-admin/internal/auth"
-	"github.com/ibldzn/go-admin/internal/config"
-	"github.com/ibldzn/go-admin/internal/database"
-	"github.com/ibldzn/go-admin/internal/securityctx"
-	"github.com/ibldzn/go-admin/internal/user"
+	"github.com/ibldzn/trs/internal/access"
+	"github.com/ibldzn/trs/internal/auth"
+	"github.com/ibldzn/trs/internal/config"
+	"github.com/ibldzn/trs/internal/database"
+	"github.com/ibldzn/trs/internal/securityctx"
+	"github.com/ibldzn/trs/internal/user"
 )
 
 func Open(t *testing.T) *sqlx.DB {
@@ -39,13 +39,13 @@ func Open(t *testing.T) *sqlx.DB {
 		t.Fatal(err)
 	}
 	var acquired int
-	if err := lock.GetContext(ctx, &acquired, `SELECT GET_LOCK('goment-integration-suite', 120)`); err != nil || acquired != 1 {
+	if err := lock.GetContext(ctx, &acquired, `SELECT GET_LOCK('trs-integration-suite', 120)`); err != nil || acquired != 1 {
 		lock.Close()
 		db.Close()
 		t.Fatalf("lock disposable integration database: acquired=%d err=%v", acquired, err)
 	}
 	t.Cleanup(func() {
-		_, _ = lock.ExecContext(context.Background(), `SELECT RELEASE_LOCK('goment-integration-suite')`)
+		_, _ = lock.ExecContext(context.Background(), `SELECT RELEASE_LOCK('trs-integration-suite')`)
 		_ = lock.Close()
 		_ = db.Close()
 	})

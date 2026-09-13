@@ -9,12 +9,14 @@ import (
 
 func TestStableActionsAreUnique(t *testing.T) {
 	actions := []Action{
-		ActionAuthLogin, ActionAuthLogout, ActionAuthRegistration,
+		ActionAuthLogin, ActionAuthLoginFailed, ActionAuthLogout, ActionAuthRegistration,
 		ActionImpersonationStarted, ActionImpersonationStopped,
 		ActionUserCreated, ActionUserProfileUpdated, ActionUserRoleChanged,
 		ActionUserActivated, ActionUserDeactivated, ActionUserPasswordReset,
 		ActionRoleCreated, ActionRoleUpdated, ActionRoleDeleted, ActionRolePermissionsUpdated,
 		ActionAdminBootstrap,
+		ActionLoanInquiry, ActionReportingGenerate, ActionLPSGenerate,
+		ActionSnapshotRefreshStarted, ActionSnapshotRefreshSucceeded, ActionSnapshotRefreshFailed,
 	}
 	seen := make(map[Action]bool, len(actions))
 	for _, action := range actions {
@@ -34,6 +36,11 @@ func TestMetadataIsTypedAndSecretFree(t *testing.T) {
 		StatusChangeMetadata{From: "active", To: "inactive"},
 		PermissionsUpdatedMetadata{Added: []string{"users.view"}, Removed: []string{"roles.view"}},
 		ImpersonationStartedMetadata{TargetRole: "manager"},
+		LoginFailedMetadata{Username: "member"},
+		LoanInquiryMetadata{AccountNumber: "1", AsOf: "2026-09-14", Source: "DWH"},
+		ReportingMetadata{AsOf: "2026-09-14", RowCount: 2, Failed: 1},
+		LPSMetadata{ParticipantCode: "31300082", ReportingDate: "20260914", RowCount: 3},
+		SnapshotRefreshMetadata{Trigger: "manual", RowCount: 4},
 	}
 	for _, value := range metadata {
 		typeOf := reflect.TypeOf(value)

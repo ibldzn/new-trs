@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ibldzn/go-admin/internal/audit"
-	"github.com/ibldzn/go-admin/internal/platform/pagination"
+	"github.com/ibldzn/trs/internal/audit"
+	"github.com/ibldzn/trs/internal/platform/pagination"
 )
 
 const PageSize = 50

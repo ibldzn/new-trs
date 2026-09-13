@@ -7,12 +7,12 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ibldzn/go-admin/internal/access"
-	"github.com/ibldzn/go-admin/internal/audit"
-	"github.com/ibldzn/go-admin/internal/features/dashboard"
-	featureRoles "github.com/ibldzn/go-admin/internal/features/roles"
-	featureUsers "github.com/ibldzn/go-admin/internal/features/users"
-	"github.com/ibldzn/go-admin/internal/testutil/integrationdb"
+	"github.com/ibldzn/trs/internal/access"
+	"github.com/ibldzn/trs/internal/audit"
+	"github.com/ibldzn/trs/internal/features/dashboard"
+	featureRoles "github.com/ibldzn/trs/internal/features/roles"
+	featureUsers "github.com/ibldzn/trs/internal/features/users"
+	"github.com/ibldzn/trs/internal/testutil/integrationdb"
 )
 
 func integrationDefinitions() []access.PermissionDefinition {

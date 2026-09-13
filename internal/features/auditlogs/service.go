@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ibldzn/go-admin/internal/platform/pagination"
+	"github.com/ibldzn/trs/internal/platform/pagination"
 )
 
 type store interface {

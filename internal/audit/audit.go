@@ -13,22 +13,30 @@ import (
 type Action string
 
 const (
-	ActionAuthLogin              Action = "auth.login"
-	ActionAuthLogout             Action = "auth.logout"
-	ActionAuthRegistration       Action = "auth.registration"
-	ActionImpersonationStarted   Action = "impersonation.started"
-	ActionImpersonationStopped   Action = "impersonation.stopped"
-	ActionUserCreated            Action = "user.created"
-	ActionUserProfileUpdated     Action = "user.profile_updated"
-	ActionUserRoleChanged        Action = "user.role_changed"
-	ActionUserActivated          Action = "user.activated"
-	ActionUserDeactivated        Action = "user.deactivated"
-	ActionUserPasswordReset      Action = "user.password_reset"
-	ActionRoleCreated            Action = "role.created"
-	ActionRoleUpdated            Action = "role.updated"
-	ActionRoleDeleted            Action = "role.deleted"
-	ActionRolePermissionsUpdated Action = "role.permissions_updated"
-	ActionAdminBootstrap         Action = "admin.bootstrap"
+	ActionAuthLoginSuccess         Action = "auth.login.success"
+	ActionAuthLoginFailed          Action = "auth.login.failed"
+	ActionAuthLogin                       = ActionAuthLoginSuccess
+	ActionAuthLogout               Action = "auth.logout"
+	ActionAuthRegistration         Action = "auth.registration"
+	ActionImpersonationStarted     Action = "impersonation.started"
+	ActionImpersonationStopped     Action = "impersonation.stopped"
+	ActionUserCreated              Action = "user.created"
+	ActionUserProfileUpdated       Action = "user.profile_updated"
+	ActionUserRoleChanged          Action = "user.role_changed"
+	ActionUserActivated            Action = "user.activated"
+	ActionUserDeactivated          Action = "user.deactivated"
+	ActionUserPasswordReset        Action = "user.password_reset"
+	ActionRoleCreated              Action = "role.created"
+	ActionRoleUpdated              Action = "role.updated"
+	ActionRoleDeleted              Action = "role.deleted"
+	ActionRolePermissionsUpdated   Action = "role.permissions_updated"
+	ActionAdminBootstrap           Action = "admin.bootstrap"
+	ActionLoanInquiry              Action = "loan.inquiry"
+	ActionReportingGenerate        Action = "reporting.generate"
+	ActionLPSGenerate              Action = "lps.generate"
+	ActionSnapshotRefreshStarted   Action = "snapshot.refresh.started"
+	ActionSnapshotRefreshSucceeded Action = "snapshot.refresh.succeeded"
+	ActionSnapshotRefreshFailed    Action = "snapshot.refresh.failed"
 )
 
 type ResourceType string
@@ -78,6 +86,44 @@ type ImpersonationStartedMetadata struct {
 }
 
 func (ImpersonationStartedMetadata) auditMetadata() {}
+
+type LoginFailedMetadata struct {
+	Username string `json:"username"`
+}
+
+func (LoginFailedMetadata) auditMetadata() {}
+
+type LoanInquiryMetadata struct {
+	AccountNumber string `json:"account_number"`
+	AsOf          string `json:"as_of"`
+	Source        string `json:"source,omitempty"`
+}
+
+func (LoanInquiryMetadata) auditMetadata() {}
+
+type ReportingMetadata struct {
+	AsOf     string `json:"as_of"`
+	RowCount int    `json:"row_count"`
+	Failed   int    `json:"failed"`
+}
+
+func (ReportingMetadata) auditMetadata() {}
+
+type LPSMetadata struct {
+	ParticipantCode string `json:"participant_code"`
+	ReportingDate   string `json:"reporting_date"`
+	RowCount        int    `json:"row_count"`
+}
+
+func (LPSMetadata) auditMetadata() {}
+
+type SnapshotRefreshMetadata struct {
+	Trigger  string `json:"trigger"`
+	RowCount int    `json:"row_count,omitempty"`
+	Error    string `json:"error,omitempty"`
+}
+
+func (SnapshotRefreshMetadata) auditMetadata() {}
 
 type Event struct {
 	Attribution Attribution
@@ -164,6 +210,7 @@ func validateIdentity(label string, identity *Identity) error {
 func knownAction(action Action) bool {
 	switch action {
 	case ActionAuthLogin,
+		ActionAuthLoginFailed,
 		ActionAuthLogout,
 		ActionAuthRegistration,
 		ActionImpersonationStarted,
@@ -178,7 +225,13 @@ func knownAction(action Action) bool {
 		ActionRoleUpdated,
 		ActionRoleDeleted,
 		ActionRolePermissionsUpdated,
-		ActionAdminBootstrap:
+		ActionAdminBootstrap,
+		ActionLoanInquiry,
+		ActionReportingGenerate,
+		ActionLPSGenerate,
+		ActionSnapshotRefreshStarted,
+		ActionSnapshotRefreshSucceeded,
+		ActionSnapshotRefreshFailed:
 		return true
 	default:
 		return false

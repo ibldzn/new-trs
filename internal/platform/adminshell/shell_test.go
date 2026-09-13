@@ -9,11 +9,11 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ibldzn/go-admin/internal/access"
-	"github.com/ibldzn/go-admin/internal/browserauth"
-	"github.com/ibldzn/go-admin/internal/platform/navigation"
-	"github.com/ibldzn/go-admin/internal/render"
-	webfiles "github.com/ibldzn/go-admin/web"
+	"github.com/ibldzn/trs/internal/access"
+	"github.com/ibldzn/trs/internal/browserauth"
+	"github.com/ibldzn/trs/internal/platform/navigation"
+	"github.com/ibldzn/trs/internal/render"
+	webfiles "github.com/ibldzn/trs/web"
 )
 
 const (

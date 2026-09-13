@@ -13,12 +13,12 @@ import (
 
 	"golang.org/x/term"
 
-	"github.com/ibldzn/go-admin/internal/access"
-	"github.com/ibldzn/go-admin/internal/app"
-	"github.com/ibldzn/go-admin/internal/audit"
-	"github.com/ibldzn/go-admin/internal/config"
-	"github.com/ibldzn/go-admin/internal/database"
-	"github.com/ibldzn/go-admin/internal/user"
+	"github.com/ibldzn/trs/internal/access"
+	"github.com/ibldzn/trs/internal/app"
+	"github.com/ibldzn/trs/internal/audit"
+	"github.com/ibldzn/trs/internal/config"
+	"github.com/ibldzn/trs/internal/database"
+	"github.com/ibldzn/trs/internal/user"
 )
 
 func runAdminCreate(ctx context.Context, arguments []string, input *os.File, output, errorOutput io.Writer) error {

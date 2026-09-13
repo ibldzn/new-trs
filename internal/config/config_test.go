@@ -16,7 +16,7 @@ func TestParseDefaults(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if config.App.Name != "Go Admin" || config.App.Port != 8080 || !config.App.IsDevelopment() {
+	if config.App.Name != "THOR Rate Sync" || config.App.Port != 8080 || config.App.Timezone != "Asia/Jakarta" || !config.App.IsDevelopment() {
 		t.Fatalf("unexpected app defaults: %+v", config.App)
 	}
 	if config.Database.Host != "127.0.0.1" || config.Database.Port != 3306 {
@@ -24,6 +24,9 @@ func TestParseDefaults(t *testing.T) {
 	}
 	if config.Session.Lifetime != 24*time.Hour || config.Session.RememberLifetime != 30*24*time.Hour {
 		t.Fatalf("unexpected session defaults: %+v", config.Session)
+	}
+	if config.Snapshot.RefreshInterval != 3*time.Hour || !config.Snapshot.RefreshOnStart || config.Reporting.Concurrency != 8 {
+		t.Fatalf("unexpected integration defaults: snapshot=%+v reporting=%+v", config.Snapshot, config.Reporting)
 	}
 }
 
@@ -43,6 +46,10 @@ func TestParseValidation(t *testing.T) {
 		{"invalid secure flag", baseValues("SESSION_SECURE", "sometimes"), "SESSION_SECURE"},
 		{"invalid session lifetime", baseValues("SESSION_LIFETIME", "0s"), "SESSION_LIFETIME"},
 		{"invalid remember lifetime", baseValues("SESSION_REMEMBER_LIFETIME", "later"), "SESSION_REMEMBER_LIFETIME"},
+		{"invalid timezone", baseValues("APP_TIMEZONE", "Mars/Olympus"), "APP_TIMEZONE"},
+		{"invalid snapshot interval", baseValues("TODAY_SNAPSHOT_REFRESH_INTERVAL", "0s"), "TODAY_SNAPSHOT_REFRESH_INTERVAL"},
+		{"invalid snapshot start", baseValues("TODAY_SNAPSHOT_REFRESH_ON_START", "sometimes"), "TODAY_SNAPSHOT_REFRESH_ON_START"},
+		{"invalid reporting concurrency", baseValues("REPORTING_CONCURRENCY", "100"), "REPORTING_CONCURRENCY"},
 	}
 
 	for _, test := range tests {
@@ -52,6 +59,26 @@ func TestParseValidation(t *testing.T) {
 				t.Fatalf("expected error containing %q, got %v", test.wantErr, err)
 			}
 		})
+	}
+}
+
+func TestValidateServerRequiresIntegrationConfiguration(t *testing.T) {
+	config, err := parse(mapLookup(baseValues("APP_ENV", "test")))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := config.ValidateServer(); err == nil || !strings.Contains(err.Error(), "DWH_DBSTRING") {
+		t.Fatalf("error = %v", err)
+	}
+	config.DWH.DSN = "dwh"
+	config.MSO.DSN = "mso"
+	config.Fincloud = FincloudConfig{BaseURL: "https://fincloud.example", Username: "system", Password: "secret", LocationID: "000", RoleID: "R-1"}
+	if err := config.ValidateServer(); err != nil {
+		t.Fatal(err)
+	}
+	config.Fincloud.BaseURL = "http://fincloud.example"
+	if err := config.ValidateServer(); err == nil || !strings.Contains(err.Error(), "https") {
+		t.Fatalf("error = %v", err)
 	}
 }
 

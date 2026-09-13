@@ -25,7 +25,7 @@ frontend-build:
 
 build: frontend-build
 	mkdir -p bin
-	go build -o bin/app ./cmd/app
+	go build -o bin/trs ./cmd/app
 
 test:
 	go test ./...

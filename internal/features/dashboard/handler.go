@@ -3,7 +3,7 @@ package dashboard
 import (
 	"net/http"
 
-	"github.com/ibldzn/go-admin/internal/platform/adminshell"
+	"github.com/ibldzn/trs/internal/platform/adminshell"
 )
 
 type Handler struct {

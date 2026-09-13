@@ -14,14 +14,14 @@ COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 COPY --from=frontend /src/web/static ./web/static
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/app ./cmd/app
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/trs ./cmd/app
 
 FROM alpine:3.23
 RUN apk add --no-cache ca-certificates \
     && addgroup -S app \
     && adduser -S -G app app
-COPY --from=backend /out/app /usr/local/bin/app
+COPY --from=backend /out/trs /usr/local/bin/trs
 ENV APP_ENV=production
 USER app
 EXPOSE 8080
-ENTRYPOINT ["app"]
+ENTRYPOINT ["trs"]

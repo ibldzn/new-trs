@@ -1,4 +1,4 @@
-module github.com/ibldzn/go-admin
+module github.com/ibldzn/trs
 
 go 1.26.5
 

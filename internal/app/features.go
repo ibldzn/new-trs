@@ -1,37 +1,70 @@
 package app
 
 import (
+	"context"
+	"io"
+	"log/slog"
+	"time"
+
 	"github.com/go-chi/chi/v5"
 	"github.com/jmoiron/sqlx"
 
-	"github.com/ibldzn/go-admin/internal/access"
-	"github.com/ibldzn/go-admin/internal/audit"
-	"github.com/ibldzn/go-admin/internal/browserauth"
-	"github.com/ibldzn/go-admin/internal/features/auditlogs"
-	"github.com/ibldzn/go-admin/internal/features/dashboard"
-	"github.com/ibldzn/go-admin/internal/features/impersonation"
-	"github.com/ibldzn/go-admin/internal/features/roles"
-	"github.com/ibldzn/go-admin/internal/features/users"
-	"github.com/ibldzn/go-admin/internal/platform/adminshell"
-	"github.com/ibldzn/go-admin/internal/platform/navigation"
-	"github.com/ibldzn/go-admin/internal/user"
+	"github.com/ibldzn/trs/internal/access"
+	"github.com/ibldzn/trs/internal/audit"
+	"github.com/ibldzn/trs/internal/browserauth"
+	"github.com/ibldzn/trs/internal/features/auditlogs"
+	"github.com/ibldzn/trs/internal/features/dashboard"
+	"github.com/ibldzn/trs/internal/features/impersonation"
+	"github.com/ibldzn/trs/internal/features/loaninquiry"
+	featurelps "github.com/ibldzn/trs/internal/features/lps"
+	featurereporting "github.com/ibldzn/trs/internal/features/reporting"
+	"github.com/ibldzn/trs/internal/features/roles"
+	"github.com/ibldzn/trs/internal/features/snapshots"
+	"github.com/ibldzn/trs/internal/features/users"
+	"github.com/ibldzn/trs/internal/loan"
+	corelps "github.com/ibldzn/trs/internal/lps"
+	"github.com/ibldzn/trs/internal/platform/adminshell"
+	"github.com/ibldzn/trs/internal/platform/navigation"
+	"github.com/ibldzn/trs/internal/reporting"
+	"github.com/ibldzn/trs/internal/snapshot"
+	"github.com/ibldzn/trs/internal/user"
 )
 
 func PermissionDefinitions() []access.PermissionDefinition {
-	definitions := make([]access.PermissionDefinition, 0, 13)
+	definitions := make([]access.PermissionDefinition, 0, 18)
 	definitions = append(definitions, dashboard.PermissionDefinitions()...)
 	definitions = append(definitions, users.PermissionDefinitions()...)
 	definitions = append(definitions, roles.PermissionDefinitions()...)
 	definitions = append(definitions, auditlogs.PermissionDefinitions()...)
+	definitions = append(definitions, loaninquiry.PermissionDefinitions()...)
+	definitions = append(definitions, featurereporting.PermissionDefinitions()...)
+	definitions = append(definitions, featurelps.PermissionDefinitions()...)
+	definitions = append(definitions, snapshots.PermissionDefinitions()...)
 	return definitions
 }
 
 type featureDependencies struct {
-	database *sqlx.DB
-	users    *user.Repository
-	access   *access.Repository
-	admin    *adminshell.Shell
-	cookies  browserauth.CookieManager
+	database  *sqlx.DB
+	users     *user.Repository
+	access    *access.Repository
+	admin     *adminshell.Shell
+	cookies   browserauth.CookieManager
+	positions interface {
+		GetLoanPosition(context.Context, string, loan.Date) (loan.ResolvedPosition, error)
+	}
+	snapshot interface {
+		Status(context.Context) (snapshot.Status, error)
+		Refresh(context.Context, snapshot.Trigger, audit.Attribution) (int, error)
+	}
+	reporting *reporting.Manager
+	lps       interface {
+		Generate(context.Context, corelps.Input, io.Writer) (corelps.Result, error)
+	}
+	location           *time.Location
+	maxReportingUpload int64
+	lpsDefaultCode     string
+	appendAudit        func(context.Context, audit.Event) error
+	logger             *slog.Logger
 }
 
 func registerFeatureRoutes(router chi.Router, dependencies featureDependencies) {
@@ -49,15 +82,20 @@ func registerFeatureRoutes(router chi.Router, dependencies featureDependencies) 
 	roles.NewHandler(dependencies.admin, roleService).RegisterRoutes(router)
 	impersonation.NewHandler(dependencies.admin, impersonationService, dependencies.cookies).RegisterRoutes(router)
 	auditlogs.NewHandler(dependencies.admin, auditLogService).RegisterRoutes(router)
+	loaninquiry.NewHandler(dependencies.admin, dependencies.positions, dependencies.location, dependencies.appendAudit, dependencies.logger).RegisterRoutes(router)
+	featurereporting.NewHandler(dependencies.admin, dependencies.reporting, dependencies.location, dependencies.maxReportingUpload).RegisterRoutes(router)
+	featurelps.NewHandler(dependencies.admin, dependencies.lps, dependencies.lpsDefaultCode, dependencies.location, dependencies.appendAudit, dependencies.logger).RegisterRoutes(router)
+	snapshots.NewHandler(dependencies.admin, dependencies.snapshot).RegisterRoutes(router)
 }
 
 func navigationGroups() []navigation.Group {
 	return []navigation.Group{
-		{Key: "general", Label: "General", Items: []navigation.Item{dashboard.Navigation()}},
+		{Key: "general", Label: "General", Items: []navigation.Item{dashboard.Navigation(), loaninquiry.Navigation()}},
+		{Key: "reporting", Label: "Reporting", Items: []navigation.Item{featurereporting.Navigation(), featurelps.Navigation()}},
 		{Key: "management", Label: "Management", Items: []navigation.Item{
 			users.Navigation(),
 			{Key: "access-control", Label: "Access Control", Icon: "shield", Children: []navigation.Item{roles.Navigation()}},
 		}},
-		{Key: "system", Label: "System", Items: []navigation.Item{auditlogs.Navigation()}},
+		{Key: "system", Label: "System", Items: []navigation.Item{snapshots.Navigation(), auditlogs.Navigation()}},
 	}
 }

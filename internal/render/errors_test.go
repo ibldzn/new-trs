@@ -11,8 +11,8 @@ import (
 
 	"github.com/go-chi/chi/v5/middleware"
 
-	"github.com/ibldzn/go-admin/internal/render"
-	webfiles "github.com/ibldzn/go-admin/web"
+	"github.com/ibldzn/trs/internal/render"
+	webfiles "github.com/ibldzn/trs/web"
 )
 
 func TestErrorResponderStatusesAndSafety(t *testing.T) {

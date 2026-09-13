@@ -3,7 +3,7 @@ package securityctx
 import (
 	"testing"
 
-	"github.com/ibldzn/go-admin/internal/access"
+	"github.com/ibldzn/trs/internal/access"
 )
 
 func TestRequesterCan(t *testing.T) {

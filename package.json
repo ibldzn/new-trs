@@ -1,5 +1,5 @@
 {
-  "name": "goment",
+  "name": "thor-rate-sync",
   "private": true,
   "scripts": {
     "build": "npm run build:css && npm run build:js",

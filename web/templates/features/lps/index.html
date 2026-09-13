@@ -1,0 +1,13 @@
+{{/* LPS generation feature */}}{{define "content"}}
+<section class="space-y-6">
+    <div><p class="text-sm font-medium text-emerald-600 dark:text-emerald-400">Reporting</p><h1 class="mt-1 text-3xl font-bold">LPS generation</h1><p class="mt-2 text-slate-600 dark:text-slate-400">Generates DN, DSN, DK, and DSJ in one ZIP.</p></div>
+    {{if .Data.Error}}<div role="alert" class="rounded-xl border border-red-300 bg-red-50 p-4 text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200">{{.Data.Error}}</div>{{end}}
+    <form method="post" action="/lps" class="grid gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:grid-cols-2 dark:border-slate-800 dark:bg-slate-900">
+        <label class="text-sm font-medium">Kode kepesertaan<input name="participant_code" value="{{.Data.Input.ParticipantCode}}" required pattern="[0-9]{8}" class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 dark:border-slate-700 dark:bg-slate-950"></label>
+        <label class="text-sm font-medium">Tanggal pelaporan<input name="reporting_date" value="{{.Data.Input.ReportingDate}}" required pattern="[0-9]{8}" placeholder="YYYYMMDD" class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 dark:border-slate-700 dark:bg-slate-950"></label>
+        <label class="text-sm font-medium">Periode pengiriman<input name="period" value="{{.Data.Input.Period}}" required maxlength="32" class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 dark:border-slate-700 dark:bg-slate-950"></label>
+        <label class="text-sm font-medium">Versi laporan<input name="version" value="{{.Data.Input.Version}}" required maxlength="32" class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 dark:border-slate-700 dark:bg-slate-950"></label>
+        <button class="rounded-lg bg-emerald-500 px-4 py-2.5 font-semibold text-slate-950 hover:bg-emerald-400 sm:col-span-2">Generate ZIP</button>
+    </form>
+</section>
+{{end}}

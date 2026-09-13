@@ -10,10 +10,10 @@ import (
 
 	"github.com/go-chi/chi/v5/middleware"
 
-	"github.com/ibldzn/go-admin/internal/audit"
-	"github.com/ibldzn/go-admin/internal/auth"
-	"github.com/ibldzn/go-admin/internal/render"
-	"github.com/ibldzn/go-admin/internal/user"
+	"github.com/ibldzn/trs/internal/audit"
+	"github.com/ibldzn/trs/internal/auth"
+	"github.com/ibldzn/trs/internal/render"
+	"github.com/ibldzn/trs/internal/user"
 )
 
 const maxFormBody = 32 << 10
@@ -89,6 +89,9 @@ func (h *HTTP) Login(writer http.ResponseWriter, request *http.Request) {
 
 	result, err := h.service.Login(request.Context(), LoginInput{Username: form.Username, Password: password, RememberMe: form.RememberMe}, time.Now().UTC())
 	if errors.Is(err, ErrInvalidCredentials) {
+		h.appendBestEffortAudit(request, audit.Event{
+			Action: audit.ActionAuthLoginFailed, Metadata: audit.LoginFailedMetadata{Username: form.Username}, CreatedAt: time.Now().UTC(),
+		})
 		form.Errors["credentials"] = "Invalid username or password."
 		h.renderLogin(writer, request, http.StatusUnprocessableEntity, form)
 		return

@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ibldzn/go-admin/internal/auth"
+	"github.com/ibldzn/trs/internal/auth"
 )
 
 type principalContextKey struct{}

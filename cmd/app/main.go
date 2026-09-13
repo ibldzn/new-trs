@@ -9,7 +9,7 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/ibldzn/go-admin/internal/app"
+	"github.com/ibldzn/trs/internal/app"
 )
 
 func main() {
@@ -51,5 +51,5 @@ func usageError() error {
 }
 
 func usageText() string {
-	return "app [serve|admin create [--username USER] [--name NAME]]"
+	return "trs [serve|admin create [--username USER] [--name NAME]]"
 }

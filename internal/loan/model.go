@@ -1,0 +1,112 @@
+package loan
+
+import "time"
+
+type PositionSource string
+
+const (
+	SourceMSO           PositionSource = "MSO"
+	SourceDWH           PositionSource = "DWH"
+	SourceTodaySnapshot PositionSource = "current_snapshot"
+	SourceReconstructed PositionSource = "reconstructed"
+)
+
+type LoanPosition struct {
+	AsOf                 Date
+	AccountNumber        string
+	PrincipalOutstanding Money
+	PrincipalDue         Money
+	InterestDue          Money
+	CollectabilityBI     int
+	UnappliedAmount      Money
+	Source               PositionSource
+	Branch               string
+	Product              string
+	CIF                  string
+	ContractNumber       string
+	SourceUpdatedAt      *time.Time
+}
+
+type OpeningLoanState struct {
+	AccountNumber        string
+	InterestType         string
+	PrincipalOutstanding Money
+	PrincipalDue         Money
+	InterestDue          Money
+	CollectabilityBI     int
+}
+
+type CollectabilityPoint struct {
+	Date  Date
+	Value int
+}
+
+type Repayment struct {
+	Date                  Date
+	PrincipalComponent    Money
+	InterestComponent     Money
+	PenaltyComponent      Money
+	EarlyPenaltyComponent Money
+	DWPComponent          Money
+	TotalPayment          Money
+	JournalNumber         string
+	SourceOrder           int
+}
+
+type ContractData struct {
+	PrimaryAccount        string
+	AlternateAccount      string
+	CIF                   string
+	CustomerName          string
+	Branch                string
+	Product               string
+	PlafondLimit          Money
+	TenorMonths           int
+	FlatRatePercent       Money
+	ReferenceRatePercent  Money
+	CurrentCollectability int
+	CurrentPrincipalDue   Money
+	CurrentInterestDue    Money
+	PenaltyDue            Money
+	Status                string
+	CloseDate             Date
+	ContractChanged       bool
+	DueDates              []Date
+	Repayments            []Repayment
+}
+
+type CalculationInput struct {
+	AsOf                   Date
+	Cutoff                 Date
+	ContractualPrincipal   Money
+	TenorMonths            int
+	FlatRatePercent        Money
+	Opening                OpeningLoanState
+	DueDates               []Date
+	Repayments             []Repayment
+	CollectabilityTimeline []CollectabilityPoint
+}
+
+type CalculationTrace struct {
+	Opening            OpeningLoanState
+	PeriodsAccrued     int
+	RepaymentsApplied  int
+	LastPaymentDate    Date
+	LastDueDateAccrued Date
+}
+
+type CalculationResult struct {
+	AsOf                 Date
+	PrincipalOutstanding Money
+	PrincipalDue         Money
+	InterestDue          Money
+	CollectabilityBI     int
+	UnappliedAmount      Money
+	Trace                CalculationTrace
+}
+
+type ResolvedPosition struct {
+	Loan     ContractData
+	Position LoanPosition
+	Trace    CalculationTrace
+}

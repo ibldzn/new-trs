@@ -10,13 +10,13 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ibldzn/go-admin/internal/access"
-	"github.com/ibldzn/go-admin/internal/browserauth"
-	"github.com/ibldzn/go-admin/internal/platform/adminshell"
-	"github.com/ibldzn/go-admin/internal/platform/pagination"
-	"github.com/ibldzn/go-admin/internal/platform/webutil"
-	"github.com/ibldzn/go-admin/internal/securityctx"
-	"github.com/ibldzn/go-admin/internal/user"
+	"github.com/ibldzn/trs/internal/access"
+	"github.com/ibldzn/trs/internal/browserauth"
+	"github.com/ibldzn/trs/internal/platform/adminshell"
+	"github.com/ibldzn/trs/internal/platform/pagination"
+	"github.com/ibldzn/trs/internal/platform/webutil"
+	"github.com/ibldzn/trs/internal/securityctx"
+	"github.com/ibldzn/trs/internal/user"
 )
 
 const maxManagementFormBody = 32 << 10

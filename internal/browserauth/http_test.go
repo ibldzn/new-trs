@@ -12,11 +12,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ibldzn/go-admin/internal/audit"
-	"github.com/ibldzn/go-admin/internal/auth"
-	"github.com/ibldzn/go-admin/internal/render"
-	"github.com/ibldzn/go-admin/internal/user"
-	webfiles "github.com/ibldzn/go-admin/web"
+	"github.com/ibldzn/trs/internal/audit"
+	"github.com/ibldzn/trs/internal/auth"
+	"github.com/ibldzn/trs/internal/render"
+	"github.com/ibldzn/trs/internal/user"
+	webfiles "github.com/ibldzn/trs/web"
 )
 
 type fakeHTTPService struct {
@@ -325,6 +325,20 @@ func TestAuthenticationAuditAttributionAndBestEffortFailure(t *testing.T) {
 		event := events[0]
 		if event.Action != audit.ActionAuthLogin || event.Attribution.Actor == nil || event.Attribution.Effective == nil || *event.Attribution.Actor != (audit.Identity{UserID: 7, Username: "user"}) || *event.Attribution.Effective != *event.Attribution.Actor {
 			t.Fatalf("unexpected login attribution: %+v", event)
+		}
+	})
+
+	t.Run("failed login is audited without local identity", func(t *testing.T) {
+		events = nil
+		service := &fakeHTTPService{loginErr: ErrInvalidCredentials}
+		handler := newTestHTTPWithAudit(t, service, false, appendAudit)
+		form := url.Values{"username": {" USER "}, "password": {"wrong-password"}}
+		request := httptest.NewRequest(http.MethodPost, "/login", strings.NewReader(form.Encode()))
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		response := httptest.NewRecorder()
+		handler.Login(response, request)
+		if response.Code != http.StatusUnprocessableEntity || len(events) != 1 || events[0].Action != audit.ActionAuthLoginFailed || events[0].Attribution.Actor != nil || events[0].Attribution.Effective != nil {
+			t.Fatalf("status=%d events=%+v", response.Code, events)
 		}
 	})
 

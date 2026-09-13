@@ -4,10 +4,10 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/ibldzn/go-admin/internal/access"
-	"github.com/ibldzn/go-admin/internal/browserauth"
-	"github.com/ibldzn/go-admin/internal/platform/navigation"
-	"github.com/ibldzn/go-admin/internal/render"
+	"github.com/ibldzn/trs/internal/access"
+	"github.com/ibldzn/trs/internal/browserauth"
+	"github.com/ibldzn/trs/internal/platform/navigation"
+	"github.com/ibldzn/trs/internal/render"
 )
 
 type Shell struct {

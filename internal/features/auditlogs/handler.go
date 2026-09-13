@@ -7,8 +7,8 @@ import (
 	"net/url"
 	"strconv"
 
-	"github.com/ibldzn/go-admin/internal/platform/adminshell"
-	"github.com/ibldzn/go-admin/internal/platform/webutil"
+	"github.com/ibldzn/trs/internal/platform/adminshell"
+	"github.com/ibldzn/trs/internal/platform/webutil"
 )
 
 type auditService interface {
