@@ -40,6 +40,16 @@ func (value *scalar) UnmarshalJSON(raw []byte) error {
 		value.value = string(raw)
 		return nil
 	}
+	if len(raw) > 0 && raw[0] == '{' {
+		var date struct {
+			Value string `json:"date"`
+		}
+		if err := json.Unmarshal(raw, &date); err != nil || strings.TrimSpace(date.Value) == "" {
+			return fmt.Errorf("expected scalar or Fincloud date object")
+		}
+		value.value = date.Value
+		return nil
+	}
 	var number json.Number
 	if err := json.Unmarshal(raw, &number); err != nil {
 		return fmt.Errorf("expected string or number")

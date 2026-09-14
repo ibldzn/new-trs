@@ -53,7 +53,7 @@ func TestMapLoanUsesActualRestructuringFields(t *testing.T) {
 		{name: "unchanged", metadata: `"restruktur_noakad_akhir":"","restruktur_tanggalakhirakad":null,"restruktur_tanggalawal":"0","restruktur_tanggalakhir":"false","restruktur_cara":"tidak","restruktur_frekuensi":"-","restrukturisasi":"1"`},
 		{name: "boolean false", metadata: `"restruktur_cara":false`},
 		{name: "final agreement", metadata: `"restruktur_noakad_akhir":"AKAD-R-2026-01"`, changed: true},
-		{name: "agreement end", metadata: `"restruktur_tanggalakhirakad":"2030-06-30"`, changed: true},
+		{name: "agreement end date object", metadata: `"restruktur_tanggalakhirakad":{"date":"2030-06-30 00:00:00.000000","timezone_type":3,"timezone":"Asia/Jakarta"}`, changed: true},
 		{name: "restructure start", metadata: `"restruktur_tanggalawal":"2026-01-15"`, changed: true},
 		{name: "restructure end", metadata: `"restruktur_tanggalakhir":"2028-01-15"`, changed: true},
 		{name: "method", metadata: `"restruktur_cara":"Perpanjangan tenor"`, changed: true},
