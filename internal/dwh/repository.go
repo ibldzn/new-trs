@@ -2,7 +2,9 @@ package dwh
 
 import (
 	"context"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -34,11 +36,11 @@ type positionRow struct {
 func (repository *Repository) ExactPosition(ctx context.Context, account string, asOf loan.Date) (loan.LoanPosition, error) {
 	const query = `
 		SELECT as_of_date, no_rekening, sisa_pokok_pinjaman, kolektibilitas_bi, tunggakan_pokok, tunggakan_bunga
-		FROM fincloud_eod_detail_outstanding_rekening_pinjaman
-		WHERE no_rekening = ? AND as_of_date = ?
+		FROM dwhv2.fincloud_eod_detail_outstanding_rekening_pinjaman
+		WHERE as_of_date = ? AND business_key_hash = ?
 		LIMIT 1`
 	var row positionRow
-	if err := repository.database.GetContext(ctx, &row, query, strings.TrimSpace(account), asOf.String()); err != nil {
+	if err := repository.database.GetContext(ctx, &row, query, asOf.String(), accountBusinessKey(account)); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return loan.LoanPosition{}, errors.Join(loan.ErrNotFound, loan.ErrHistoricalEvidence)
 		}
@@ -59,15 +61,24 @@ func (repository *Repository) CollectabilityTimeline(ctx context.Context, accoun
 		return []loan.CollectabilityPoint{}, nil
 	}
 	const query = `
-		SELECT as_of_date, kolektibilitas_bi
-		FROM fincloud_eod_detail_outstanding_rekening_pinjaman
-		WHERE no_rekening = ? AND as_of_date BETWEEN ? AND ?
-		ORDER BY as_of_date ASC`
+		WITH RECURSIVE dates (as_of_date) AS (
+			SELECT CAST(? AS DATE)
+			UNION ALL
+			SELECT DATE_ADD(as_of_date, INTERVAL 1 DAY)
+			FROM dates
+			WHERE as_of_date < CAST(? AS DATE)
+		)
+		SELECT position.as_of_date, position.kolektibilitas_bi
+		FROM dates
+		JOIN dwhv2.fincloud_eod_detail_outstanding_rekening_pinjaman AS position
+		  ON position.as_of_date = dates.as_of_date
+		 AND position.business_key_hash = ?
+		ORDER BY position.as_of_date ASC`
 	var rows []struct {
 		Date  time.Time `db:"as_of_date"`
 		Value int       `db:"kolektibilitas_bi"`
 	}
-	if err := repository.database.SelectContext(ctx, &rows, query, strings.TrimSpace(account), from.String(), to.String()); err != nil {
+	if err := repository.database.SelectContext(ctx, &rows, query, from.String(), to.String(), accountBusinessKey(account)); err != nil {
 		return nil, errors.Join(loan.ErrDWHUnavailable, err)
 	}
 	points := make([]loan.CollectabilityPoint, 0, len(rows))
@@ -85,6 +96,11 @@ func (repository *Repository) CollectabilityTimeline(ctx context.Context, accoun
 		points = append(points, point)
 	}
 	return points, nil
+}
+
+func accountBusinessKey(account string) string {
+	encoded, _ := json.Marshal([]string{strings.TrimSpace(account)})
+	return fmt.Sprintf("%x", sha256.Sum256(encoded))
 }
 
 func validateBalances(principal, principalDue, interestDue loan.Money, collectability int) error {

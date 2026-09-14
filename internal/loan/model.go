@@ -53,6 +53,20 @@ type Repayment struct {
 	SourceOrder           int
 }
 
+type ContractualInstallment struct {
+	Number  int
+	DueDate Date
+}
+
+type ContractualScheduleRow struct {
+	Number           int
+	DueDate          Date
+	Principal        Money
+	Interest         Money
+	Installment      Money
+	ScheduledBalance Money
+}
+
 type ContractData struct {
 	PrimaryAccount        string
 	AlternateAccount      string
@@ -71,7 +85,8 @@ type ContractData struct {
 	Status                string
 	CloseDate             Date
 	ContractChanged       bool
-	DueDates              []Date
+	RawScheduleCount      int
+	ContractSchedule      []ContractualInstallment
 	Repayments            []Repayment
 }
 
@@ -82,7 +97,7 @@ type CalculationInput struct {
 	TenorMonths            int
 	FlatRatePercent        Money
 	Opening                OpeningLoanState
-	DueDates               []Date
+	ContractSchedule       []ContractualInstallment
 	Repayments             []Repayment
 	CollectabilityTimeline []CollectabilityPoint
 }
@@ -103,10 +118,12 @@ type CalculationResult struct {
 	CollectabilityBI     int
 	UnappliedAmount      Money
 	Trace                CalculationTrace
+	ContractualSchedule  []ContractualScheduleRow
 }
 
 type ResolvedPosition struct {
-	Loan     ContractData
-	Position LoanPosition
-	Trace    CalculationTrace
+	Loan                ContractData
+	Position            LoanPosition
+	Trace               CalculationTrace
+	ContractualSchedule []ContractualScheduleRow
 }

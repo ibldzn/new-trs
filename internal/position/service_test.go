@@ -106,7 +106,7 @@ func TestPositionServiceSelectsAuthoritativeSource(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			asOf := parseDate(test.asOf, location)
-			contract := loan.ContractData{PrimaryAccount: "3080020000000094", AlternateAccount: "0130112345", PlafondLimit: loan.MustMoney("100"), TenorMonths: 1, FlatRatePercent: loan.MustMoney("12"), ContractChanged: test.changed, DueDates: []loan.Date{parseDate("2025-11-12", location)}}
+			contract := loan.ContractData{PrimaryAccount: "3080020000000094", AlternateAccount: "0130112345", PlafondLimit: loan.MustMoney("100"), TenorMonths: 1, FlatRatePercent: loan.MustMoney("12"), ContractChanged: test.changed, ContractSchedule: []loan.ContractualInstallment{{Number: 1, DueDate: parseDate("2025-11-12", location)}}}
 			fincloud := &fincloudFake{contract: contract}
 			mso := &msoFake{historical: loan.LoanPosition{AccountNumber: "01.301.12345", Source: loan.SourceMSO}, opening: loan.OpeningLoanState{AccountNumber: "01.301.12345", InterestType: test.interestType, PrincipalOutstanding: loan.MustMoney("100"), CollectabilityBI: 2}}
 			dwh := &dwhFake{exact: loan.LoanPosition{Source: loan.SourceDWH}, timeline: []loan.CollectabilityPoint{{Date: parseDate("2026-09-13", location), Value: 3}}}
@@ -162,9 +162,54 @@ func TestPositionServiceRejectsFutureBeforeUpstreamCall(t *testing.T) {
 	}
 }
 
+func TestPositionServiceReconstructsNormalizedTenorPlusOneSchedule(t *testing.T) {
+	location := time.FixedZone("Jakarta", 7*60*60)
+	schedule := make([]loan.ContractualInstallment, 60)
+	firstDue := time.Date(2021, time.October, 20, 0, 0, 0, 0, location)
+	for index := range schedule {
+		schedule[index] = loan.ContractualInstallment{Number: index + 1, DueDate: loan.NewDate(firstDue.AddDate(0, index, 0), location)}
+	}
+	contract := loan.ContractData{
+		PrimaryAccount: "primary", AlternateAccount: "alternate", PlafondLimit: loan.MustMoney("100000000"), TenorMonths: 60,
+		FlatRatePercent: loan.MustMoney("7.8"), RawScheduleCount: 61, ContractSchedule: schedule,
+	}
+	mso := &msoFake{opening: loan.OpeningLoanState{InterestType: FlatInterestType, PrincipalOutstanding: loan.MustMoney("100"), CollectabilityBI: 1}}
+	dwh := &dwhFake{}
+	snapshot := &snapshotFake{position: loan.LoanPosition{Source: loan.SourceTodaySnapshot, CollectabilityBI: 2}}
+	calculator := &calculatorFake{result: loan.CalculationResult{PrincipalOutstanding: loan.MustMoney("50"), CollectabilityBI: 1}}
+	service, _ := NewService(&fincloudFake{contract: contract}, mso, dwh, snapshot, calculator, location)
+	service.now = func() time.Time { return parseDate("2026-09-14", location).Time(location) }
+
+	result, err := service.GetLoanPosition(context.Background(), "primary", parseDate("2026-09-14", location))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Position.Source != loan.SourceReconstructed || calculator.calls != 1 || dwh.exactCalls != 0 || snapshot.calls != 1 {
+		t.Fatalf("source=%s calculator=%d exact=%d snapshot=%d", result.Position.Source, calculator.calls, dwh.exactCalls, snapshot.calls)
+	}
+	if result.Loan.RawScheduleCount != 61 || len(result.Loan.ContractSchedule) != 60 || len(calculator.input.ContractSchedule) != 60 {
+		t.Fatalf("raw=%d normalized=%d calculator=%d", result.Loan.RawScheduleCount, len(result.Loan.ContractSchedule), len(calculator.input.ContractSchedule))
+	}
+}
+
+func TestPositionServiceRejectsInvalidFlatContractSchedule(t *testing.T) {
+	location := time.FixedZone("Jakarta", 7*60*60)
+	contract := loan.ContractData{PrimaryAccount: "primary", AlternateAccount: "alternate", PlafondLimit: loan.MustMoney("100"), TenorMonths: 2, FlatRatePercent: loan.MustMoney("12"), ContractSchedule: []loan.ContractualInstallment{{Number: 1, DueDate: parseDate("2025-11-12", location)}}}
+	mso := &msoFake{opening: loan.OpeningLoanState{InterestType: FlatInterestType, PrincipalOutstanding: loan.MustMoney("100"), CollectabilityBI: 1}}
+	dwh := &dwhFake{}
+	calculator := &calculatorFake{}
+	service, _ := NewService(&fincloudFake{contract: contract}, mso, dwh, &snapshotFake{}, calculator, location)
+	service.now = func() time.Time { return parseDate("2026-09-14", location).Time(location) }
+
+	_, err := service.GetLoanPosition(context.Background(), "primary", parseDate("2026-09-13", location))
+	if !errors.Is(err, loan.ErrUnsupportedCalculation) || dwh.exactCalls != 0 || calculator.calls != 0 {
+		t.Fatalf("error=%v exact=%d calculator=%d", err, dwh.exactCalls, calculator.calls)
+	}
+}
+
 func TestPositionServiceNeverFallsBackFromMissingEvidence(t *testing.T) {
 	location := time.FixedZone("Jakarta", 7*60*60)
-	contract := loan.ContractData{PrimaryAccount: "primary", AlternateAccount: "alternate", PlafondLimit: loan.MustMoney("100"), TenorMonths: 1, FlatRatePercent: loan.MustMoney("12"), DueDates: []loan.Date{parseDate("2025-11-12", location)}}
+	contract := loan.ContractData{PrimaryAccount: "primary", AlternateAccount: "alternate", PlafondLimit: loan.MustMoney("100"), TenorMonths: 1, FlatRatePercent: loan.MustMoney("12"), ContractSchedule: []loan.ContractualInstallment{{Number: 1, DueDate: parseDate("2025-11-12", location)}}}
 	mso := &msoFake{opening: loan.OpeningLoanState{AccountNumber: "primary", InterestType: "10", PrincipalOutstanding: loan.MustMoney("100"), CollectabilityBI: 1}}
 	dwh := &dwhFake{timelineError: loan.ErrDWHUnavailable}
 	snapshot := &snapshotFake{position: loan.LoanPosition{PrincipalOutstanding: loan.MustMoney("999"), CollectabilityBI: 1}}

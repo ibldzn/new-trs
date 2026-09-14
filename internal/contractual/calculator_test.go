@@ -181,8 +181,10 @@ func TestCalculatorRejectsInvalidEvidence(t *testing.T) {
 		{"invalid opening collectability", func(input *loan.CalculationInput) { input.Opening.CollectabilityBI = 0 }, loan.ErrInvariant},
 		{"negative opening", func(input *loan.CalculationInput) { input.Opening.InterestDue = money("-1") }, loan.ErrInvariant},
 		{"principal due over outstanding", func(input *loan.CalculationInput) { input.Opening.PrincipalDue = money("201") }, loan.ErrInvariant},
-		{"incomplete schedule", func(input *loan.CalculationInput) { input.DueDates = input.DueDates[:11] }, loan.ErrUnsupportedCalculation},
-		{"duplicate schedule", func(input *loan.CalculationInput) { input.DueDates[1] = input.DueDates[0] }, loan.ErrInvariant},
+		{"incomplete schedule", func(input *loan.CalculationInput) { input.ContractSchedule = input.ContractSchedule[:11] }, loan.ErrUnsupportedCalculation},
+		{"duplicate schedule", func(input *loan.CalculationInput) {
+			input.ContractSchedule[1].DueDate = input.ContractSchedule[0].DueDate
+		}, loan.ErrUnsupportedCalculation},
 		{"invalid timeline", func(input *loan.CalculationInput) {
 			input.CollectabilityTimeline = []loan.CollectabilityPoint{{Date: date("2025-11-01"), Value: 6}}
 		}, loan.ErrHistoricalEvidence},
@@ -202,14 +204,52 @@ func TestCalculatorRejectsInvalidEvidence(t *testing.T) {
 	}
 }
 
+func TestBuildScheduleUsesContractFormulaAndFinalPrincipalRemainder(t *testing.T) {
+	source := []loan.ContractualInstallment{
+		{Number: 3, DueDate: date("2026-04-01")},
+		{Number: 1, DueDate: date("2026-02-01")},
+		{Number: 2, DueDate: date("2026-03-01")},
+	}
+	calculator := Calculator{Round: func(value loan.Money) loan.Money { return loan.MustMoney(value.Format(2)) }}
+	rows, err := calculator.BuildSchedule(money("100"), 3, money("12"), source)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(rows) != 3 {
+		t.Fatalf("schedule rows = %d", len(rows))
+	}
+	wantPrincipal := []string{"33.33", "33.33", "33.34"}
+	wantBalance := []string{"66.67", "33.34", "0.00"}
+	totalPrincipal := loan.Money{}
+	for index, row := range rows {
+		if row.Number != index+1 || row.DueDate.String() != []string{"2026-02-01", "2026-03-01", "2026-04-01"}[index] || row.Principal.Format(2) != wantPrincipal[index] || row.Interest.Format(2) != "1.00" || row.Installment.Format(2) != loan.MustMoney(wantPrincipal[index]).Add(money("1")).Format(2) || row.ScheduledBalance.Format(2) != wantBalance[index] {
+			t.Fatalf("row[%d] = %+v", index, row)
+		}
+		totalPrincipal = totalPrincipal.Add(row.Principal)
+	}
+	if totalPrincipal.Cmp(money("100")) != 0 || !rows[len(rows)-1].ScheduledBalance.IsZero() {
+		t.Fatalf("principal total=%s final balance=%s", totalPrincipal, rows[len(rows)-1].ScheduledBalance)
+	}
+	result, err := calculator.Calculate(loan.CalculationInput{
+		AsOf: date("2026-04-01"), Cutoff: date("2026-01-15"), ContractualPrincipal: money("100"), TenorMonths: 3,
+		FlatRatePercent: money("12"), Opening: loan.OpeningLoanState{PrincipalOutstanding: money("100"), CollectabilityBI: 1}, ContractSchedule: source,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.PrincipalDue.Cmp(money("100")) != 0 || len(result.ContractualSchedule) != 3 {
+		t.Fatalf("principal due=%s schedule=%d", result.PrincipalDue, len(result.ContractualSchedule))
+	}
+}
+
 func baseInput() loan.CalculationInput {
-	dueDates := make([]loan.Date, 0, 12)
+	schedule := make([]loan.ContractualInstallment, 0, 12)
 	for month := 1; month <= 12; month++ {
-		dueDates = append(dueDates, loan.NewDate(time.Date(2025, time.Month(month), 12, 0, 0, 0, 0, testLocation), testLocation))
+		schedule = append(schedule, loan.ContractualInstallment{Number: month, DueDate: loan.NewDate(time.Date(2025, time.Month(month), 12, 0, 0, 0, 0, testLocation), testLocation)})
 	}
 	return loan.CalculationInput{
 		AsOf: date("2025-10-13"), Cutoff: date("2025-10-12"), ContractualPrincipal: money("1200"), TenorMonths: 12,
-		FlatRatePercent: money("12"), Opening: loan.OpeningLoanState{PrincipalOutstanding: money("200"), CollectabilityBI: 1}, DueDates: dueDates,
+		FlatRatePercent: money("12"), Opening: loan.OpeningLoanState{PrincipalOutstanding: money("200"), CollectabilityBI: 1}, ContractSchedule: schedule,
 	}
 }
 

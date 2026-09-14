@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -83,6 +84,7 @@ func (service *Service) GetLoanPosition(ctx context.Context, account string, asO
 		if err == nil {
 			position.AccountNumber = primary
 		}
+		logDecision(ctx, contract, "", loan.SourceMSO, "before_cutoff")
 		return loan.ResolvedPosition{Loan: contract, Position: position}, err
 	}
 	opening, err := service.mso.OpeningState(ctx, msoAccount, service.cutoff)
@@ -91,11 +93,27 @@ func (service *Service) GetLoanPosition(ctx context.Context, account string, asO
 	}
 	opening.AccountNumber = primary
 	if asOf.Equal(service.cutoff) {
+		logDecision(ctx, contract, opening.InterestType, loan.SourceMSO, "cutoff_opening")
 		return loan.ResolvedPosition{Loan: contract, Position: openingPosition(opening, asOf)}, nil
 	}
-	if opening.InterestType != FlatInterestType || contract.ContractChanged || !validSchedule(contract) {
+	reason := ""
+	if opening.InterestType != FlatInterestType {
+		reason = "non_flat_interest_type"
+	} else if contract.ContractChanged {
+		reason = "contract_changed"
+	}
+	if reason != "" {
 		position, err := service.exactPosition(ctx, primary, asOf, today)
+		selected := loan.SourceDWH
+		if asOf.Equal(today) {
+			selected = loan.SourceTodaySnapshot
+		}
+		logDecision(ctx, contract, opening.InterestType, selected, reason)
 		return loan.ResolvedPosition{Loan: contract, Position: position}, err
+	}
+	if !validSchedule(contract) {
+		logDecision(ctx, contract, opening.InterestType, "", "invalid_contractual_schedule")
+		return loan.ResolvedPosition{}, fmt.Errorf("%w: invalid contractual installment schedule", loan.ErrUnsupportedCalculation)
 	}
 
 	timelineEnd := asOf
@@ -118,7 +136,7 @@ func (service *Service) GetLoanPosition(ctx context.Context, account string, asO
 	}
 	calculation, err := service.calculator.Calculate(loan.CalculationInput{
 		AsOf: asOf, Cutoff: service.cutoff, ContractualPrincipal: contract.PlafondLimit, TenorMonths: contract.TenorMonths,
-		FlatRatePercent: contract.FlatRatePercent, Opening: opening, DueDates: contract.DueDates,
+		FlatRatePercent: contract.FlatRatePercent, Opening: opening, ContractSchedule: contract.ContractSchedule,
 		Repayments: contract.Repayments, CollectabilityTimeline: timeline,
 	})
 	if err != nil {
@@ -129,7 +147,8 @@ func (service *Service) GetLoanPosition(ctx context.Context, account string, asO
 		PrincipalDue: calculation.PrincipalDue, InterestDue: calculation.InterestDue,
 		CollectabilityBI: calculation.CollectabilityBI, UnappliedAmount: calculation.UnappliedAmount, Source: loan.SourceReconstructed,
 	}
-	return loan.ResolvedPosition{Loan: contract, Position: position, Trace: calculation.Trace}, nil
+	logDecision(ctx, contract, opening.InterestType, loan.SourceReconstructed, "reconstructed")
+	return loan.ResolvedPosition{Loan: contract, Position: position, Trace: calculation.Trace, ContractualSchedule: calculation.ContractualSchedule}, nil
 }
 
 func formatFincloudAltNoToMSO(account string) string {
@@ -156,19 +175,30 @@ func openingPosition(opening loan.OpeningLoanState, asOf loan.Date) loan.LoanPos
 }
 
 func validSchedule(contract loan.ContractData) bool {
-	if contract.TenorMonths <= 0 || len(contract.DueDates) != contract.TenorMonths {
+	if contract.TenorMonths <= 0 || len(contract.ContractSchedule) != contract.TenorMonths {
 		return false
 	}
-	seen := make(map[string]struct{}, len(contract.DueDates))
-	for _, date := range contract.DueDates {
-		if date.IsZero() {
+	for index, installment := range contract.ContractSchedule {
+		if installment.Number != index+1 || installment.DueDate.IsZero() {
 			return false
 		}
-		key := date.String()
-		if _, duplicate := seen[key]; duplicate {
+		if index > 0 && !installment.DueDate.After(contract.ContractSchedule[index-1].DueDate) {
 			return false
 		}
-		seen[key] = struct{}{}
 	}
 	return true
+}
+
+func logDecision(ctx context.Context, contract loan.ContractData, interestType string, source loan.PositionSource, reason string) {
+	slog.InfoContext(ctx, "loan position source selected",
+		"primary_account", contract.PrimaryAccount,
+		"alternate_account", contract.AlternateAccount,
+		"mso_interest_type", interestType,
+		"contract_changed", contract.ContractChanged,
+		"tenor_months", contract.TenorMonths,
+		"raw_fincloud_schedule_rows", contract.RawScheduleCount,
+		"normalized_contractual_schedule_count", len(contract.ContractSchedule),
+		"selected_position_source", source,
+		"reason", reason,
+	)
 }

@@ -24,8 +24,19 @@
         <article class="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900"><h2 class="text-sm text-slate-500">Interest due</h2><p class="mt-2 text-xl font-semibold">Rp {{.InterestDue}}</p></article>
         <article class="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900"><h2 class="text-sm text-slate-500">Penalty reference</h2><p class="mt-2 text-xl font-semibold">Rp {{.PenaltyDue}}</p></article>
         <article class="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900"><h2 class="text-sm text-slate-500">ET estimate</h2><p class="mt-2 text-xl font-semibold">Rp {{.EarlyTerminationEstimate}}</p><p class="text-sm text-slate-500">6 contractual installments</p></article>
-        <article class="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900"><h2 class="text-sm text-slate-500">Installment schedule</h2><p class="mt-2 text-xl font-semibold">{{if eq .Position.Source "reconstructed"}}{{.PeriodsAccrued}} / {{end}}{{.DueDateCount}}</p><p class="text-sm text-slate-500">{{if eq .Position.Source "reconstructed"}}Contractual periods accrued through the reporting date{{else}}Contractual schedule dates{{end}}</p></article>
+        <article class="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900"><h2 class="text-sm text-slate-500">Installment schedule</h2><p class="mt-2 text-xl font-semibold">{{.DueDateCount}}</p><p class="text-sm text-slate-500">Contractual installments</p></article>
     </div>
+    {{if .ContractualSchedule}}
+    <div>
+        <div class="mb-3"><h2 class="text-xl font-semibold">Contractual installment schedule</h2><p class="mt-1 text-sm text-slate-500">Scheduled balance follows contract dates and amounts. Principal outstanding above reflects actual reconstructed payment allocation.</p></div>
+        <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+            <table class="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-800">
+                <thead class="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:bg-slate-900/80 dark:text-slate-400"><tr><th class="whitespace-nowrap px-4 py-3 text-left">No.</th><th class="whitespace-nowrap px-4 py-3 text-left">Due date</th><th class="whitespace-nowrap px-4 py-3 text-right">Contractual principal</th><th class="whitespace-nowrap px-4 py-3 text-right">Contractual interest</th><th class="whitespace-nowrap px-4 py-3 text-right">Contractual installment</th><th class="whitespace-nowrap px-4 py-3 text-right">Scheduled balance</th></tr></thead>
+                <tbody class="divide-y divide-slate-100 dark:divide-slate-800">{{range .ContractualSchedule}}<tr class="hover:bg-slate-50 dark:hover:bg-slate-800/40"><td class="whitespace-nowrap px-4 py-3">{{.Number}}</td><td class="whitespace-nowrap px-4 py-3">{{.DueDate}}</td><td class="whitespace-nowrap px-4 py-3 text-right">Rp {{.Principal}}</td><td class="whitespace-nowrap px-4 py-3 text-right">Rp {{.Interest}}</td><td class="whitespace-nowrap px-4 py-3 text-right font-medium">Rp {{.Installment}}</td><td class="whitespace-nowrap px-4 py-3 text-right">Rp {{.ScheduledBalance}}</td></tr>{{end}}</tbody>
+            </table>
+        </div>
+    </div>
+    {{end}}
     {{end}}
 </section>
 {{end}}

@@ -82,7 +82,7 @@ func TestGetLoanDecodesRepaymentUnderscoreFields(t *testing.T) {
 			_, _ = io.WriteString(writer, `{"status":"ok","data":{"result":{"sessionid":"session"}}}`)
 			return
 		}
-		_, _ = io.WriteString(writer, `{"status":"ok","data":{"result":{"id":"primary","plafondlimit":"1200","jangkawaktu":"1 bulan","bungaflat":"12","historybayar":[{"tglbayar":"2026-01-02","bayar_pokok":"100","bayar_bunga":"20","bayar_denda":"3","bayar_dendapelunasan":"4","nominaldwp":"5","totalbayar":"132","nojurnal":"J-1"}]}}}`)
+		_, _ = io.WriteString(writer, `{"status":"ok","data":{"result":{"id":"primary","plafondlimit":"1200","jangkawaktu":"1 bulan","bungaflat":"12","jadwalangsuran":[{"tanggal":"2026-10-01","angsuranke":1}],"historybayar":[{"tglbayar":"2026-01-02","bayar_pokok":"100","bayar_bunga":"20","bayar_denda":"3","bayar_dendapelunasan":"4","nominaldwp":"5","totalbayar":"132","nojurnal":"J-1"}]}}}`)
 	}))
 	defer server.Close()
 	client := newTestClient(t, server)
@@ -224,7 +224,7 @@ func (response response) write(writer http.ResponseWriter) {
 }
 
 func okLoan(id string) response {
-	return response{body: fmt.Sprintf(`{"status":"ok","data":{"result":{"id":%q,"plafondlimit":"1200","jangkawaktu":"1 bulan","bungaflat":"12","jadwalangsuran":[{"tanggal":"2026-10-01"}]}}}`, id)}
+	return response{body: fmt.Sprintf(`{"status":"ok","data":{"result":{"id":%q,"plafondlimit":"1200","jangkawaktu":"1 bulan","bungaflat":"12","jadwalangsuran":[{"tanggal":"2026-10-01","angsuranke":1}]}}}`, id)}
 }
 
 func okSearch(rows string) response {

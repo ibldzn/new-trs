@@ -1,6 +1,7 @@
 package contractual
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
 	"slices"
@@ -37,35 +38,11 @@ func (calculator Calculator) Calculate(input loan.CalculationInput) (loan.Calcul
 	if input.ContractualPrincipal.IsNegative() || input.ContractualPrincipal.IsZero() || input.TenorMonths <= 0 || input.FlatRatePercent.IsNegative() {
 		return loan.CalculationResult{}, fmt.Errorf("%w: invalid contract parameters", loan.ErrInvariant)
 	}
-
-	dueDates := append([]loan.Date(nil), input.DueDates...)
-	slices.SortFunc(dueDates, compareDate)
-	if len(dueDates) != input.TenorMonths {
-		return loan.CalculationResult{}, fmt.Errorf("%w: got %d due dates for %d-month tenor", loan.ErrUnsupportedCalculation, len(dueDates), input.TenorMonths)
-	}
-	for index, date := range dueDates {
-		if date.IsZero() || (index > 0 && date.Equal(dueDates[index-1])) {
-			return loan.CalculationResult{}, fmt.Errorf("%w: invalid or duplicate contractual due date", loan.ErrInvariant)
-		}
-	}
-
-	principalPerPeriod, err := input.ContractualPrincipal.DivInt(int64(input.TenorMonths))
+	schedule, err := calculator.BuildSchedule(input.ContractualPrincipal, input.TenorMonths, input.FlatRatePercent, input.ContractSchedule)
 	if err != nil {
-		return loan.CalculationResult{}, fmt.Errorf("%w: principal installment: %v", loan.ErrInvariant, err)
+		return loan.CalculationResult{}, err
 	}
-	interestPerPeriod := input.ContractualPrincipal.Mul(input.FlatRatePercent)
-	interestPerPeriod, err = interestPerPeriod.DivInt(100)
-	if err == nil {
-		interestPerPeriod, err = interestPerPeriod.DivInt(12)
-	}
-	if err != nil {
-		return loan.CalculationResult{}, fmt.Errorf("%w: interest installment: %v", loan.ErrInvariant, err)
-	}
-	principalPerPeriod = calculator.round(principalPerPeriod)
-	interestPerPeriod = calculator.round(interestPerPeriod)
-	if principalPerPeriod.IsNegative() || interestPerPeriod.IsNegative() {
-		return loan.CalculationResult{}, fmt.Errorf("%w: rounding policy returned negative installment", loan.ErrInvariant)
-	}
+	result.ContractualSchedule = schedule
 
 	timeline := append([]loan.CollectabilityPoint(nil), input.CollectabilityTimeline...)
 	slices.SortStableFunc(timeline, func(left, right loan.CollectabilityPoint) int { return compareDate(left.Date, right.Date) })
@@ -76,20 +53,20 @@ func (calculator Calculator) Calculate(input loan.CalculationInput) (loan.Calcul
 	slices.SortStableFunc(repayments, func(left, right loan.Repayment) int { return compareDate(left.Date, right.Date) })
 
 	nextDue := 0
-	for nextDue < len(dueDates) && !dueDates[nextDue].After(input.Cutoff) {
+	for nextDue < len(schedule) && !schedule[nextDue].DueDate.After(input.Cutoff) {
 		nextDue++
 	}
 	accrueThrough := func(date loan.Date) {
-		for nextDue < len(dueDates) && !dueDates[nextDue].After(date) {
+		for nextDue < len(schedule) && !schedule[nextDue].DueDate.After(date) {
 			if state.principal.IsPositive() {
 				available := state.principal.Sub(state.principalDue)
 				if available.IsPositive() {
-					state.principalDue = state.principalDue.Add(loan.MinMoney(principalPerPeriod, available))
+					state.principalDue = state.principalDue.Add(loan.MinMoney(schedule[nextDue].Principal, available))
 				}
-				state.interestDue = state.interestDue.Add(interestPerPeriod)
+				state.interestDue = state.interestDue.Add(schedule[nextDue].Interest)
 			}
 			result.Trace.PeriodsAccrued++
-			result.Trace.LastDueDateAccrued = dueDates[nextDue]
+			result.Trace.LastDueDateAccrued = schedule[nextDue].DueDate
 			nextDue++
 		}
 	}
@@ -122,6 +99,57 @@ func (calculator Calculator) Calculate(input loan.CalculationInput) (loan.Calcul
 	}
 	result.CollectabilityBI = collectability
 	return finish(result, state)
+}
+
+func (calculator Calculator) BuildSchedule(principal loan.Money, tenor int, flatRate loan.Money, source []loan.ContractualInstallment) ([]loan.ContractualScheduleRow, error) {
+	if principal.IsNegative() || principal.IsZero() || tenor <= 0 || flatRate.IsNegative() {
+		return nil, fmt.Errorf("%w: invalid contract parameters", loan.ErrInvariant)
+	}
+	installments := append([]loan.ContractualInstallment(nil), source...)
+	slices.SortFunc(installments, func(left, right loan.ContractualInstallment) int { return cmp.Compare(left.Number, right.Number) })
+	if len(installments) != tenor {
+		return nil, fmt.Errorf("%w: got %d contractual installments for %d-month tenor", loan.ErrUnsupportedCalculation, len(installments), tenor)
+	}
+	for index, installment := range installments {
+		if installment.Number != index+1 || installment.DueDate.IsZero() {
+			return nil, fmt.Errorf("%w: invalid contractual installment numbering", loan.ErrUnsupportedCalculation)
+		}
+		if index > 0 && !installment.DueDate.After(installments[index-1].DueDate) {
+			return nil, fmt.Errorf("%w: contractual installment dates are not strictly chronological", loan.ErrUnsupportedCalculation)
+		}
+	}
+
+	principalPerPeriod, err := principal.DivInt(int64(tenor))
+	if err != nil {
+		return nil, fmt.Errorf("%w: principal installment: %v", loan.ErrInvariant, err)
+	}
+	interestPerPeriod := principal.Mul(flatRate)
+	interestPerPeriod, err = interestPerPeriod.DivInt(1200)
+	if err != nil {
+		return nil, fmt.Errorf("%w: interest installment: %v", loan.ErrInvariant, err)
+	}
+	principalPerPeriod = calculator.round(principalPerPeriod)
+	interestPerPeriod = calculator.round(interestPerPeriod)
+	if principalPerPeriod.IsNegative() || interestPerPeriod.IsNegative() {
+		return nil, fmt.Errorf("%w: rounding policy returned negative installment", loan.ErrInvariant)
+	}
+
+	rows := make([]loan.ContractualScheduleRow, tenor)
+	balance := principal
+	for index, installment := range installments {
+		periodPrincipal := principalPerPeriod
+		if index == tenor-1 {
+			periodPrincipal = balance
+		} else if periodPrincipal.Cmp(balance) > 0 {
+			return nil, fmt.Errorf("%w: rounding policy exhausts principal before final installment", loan.ErrInvariant)
+		}
+		balance = balance.Sub(periodPrincipal)
+		rows[index] = loan.ContractualScheduleRow{
+			Number: installment.Number, DueDate: installment.DueDate, Principal: periodPrincipal,
+			Interest: interestPerPeriod, Installment: periodPrincipal.Add(interestPerPeriod), ScheduledBalance: balance,
+		}
+	}
+	return rows, nil
 }
 
 func (calculator Calculator) round(value loan.Money) loan.Money {

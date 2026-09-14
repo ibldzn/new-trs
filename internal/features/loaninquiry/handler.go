@@ -3,6 +3,7 @@ package loaninquiry
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -48,8 +49,17 @@ type ResultView struct {
 	PeriodicPrincipal        string
 	PeriodicInterest         string
 	EarlyTerminationEstimate string
-	PeriodsAccrued           int
 	DueDateCount             int
+	ContractualSchedule      []ScheduleRowView
+}
+
+type ScheduleRowView struct {
+	Number           int
+	DueDate          string
+	Principal        string
+	Interest         string
+	Installment      string
+	ScheduledBalance string
 }
 
 func NewHandler(admin *adminshell.Shell, positions positionService, location *time.Location, appendAudit func(context.Context, audit.Event) error, logger *slog.Logger) *Handler {
@@ -103,24 +113,43 @@ func (handler *Handler) Inquiry(writer http.ResponseWriter, request *http.Reques
 }
 
 func newResultView(resolved loan.ResolvedPosition) (ResultView, error) {
-	principalPerPeriod, err := resolved.Loan.PlafondLimit.DivInt(int64(resolved.Loan.TenorMonths))
-	if err != nil {
-		return ResultView{}, err
-	}
-	interestPerPeriod := resolved.Loan.PlafondLimit.Mul(resolved.Loan.FlatRatePercent)
-	interestPerPeriod, err = interestPerPeriod.DivInt(1200)
-	if err != nil {
-		return ResultView{}, err
+	var principalPerPeriod, interestPerPeriod loan.Money
+	if resolved.Position.Source == loan.SourceReconstructed {
+		if len(resolved.ContractualSchedule) == 0 {
+			return ResultView{}, fmt.Errorf("%w: reconstructed contractual schedule is empty", loan.ErrInvariant)
+		}
+		principalPerPeriod = resolved.ContractualSchedule[0].Principal
+		interestPerPeriod = resolved.ContractualSchedule[0].Interest
+	} else {
+		var err error
+		principalPerPeriod, err = resolved.Loan.PlafondLimit.DivInt(int64(resolved.Loan.TenorMonths))
+		if err != nil {
+			return ResultView{}, err
+		}
+		interestPerPeriod = resolved.Loan.PlafondLimit.Mul(resolved.Loan.FlatRatePercent)
+		interestPerPeriod, err = interestPerPeriod.DivInt(1200)
+		if err != nil {
+			return ResultView{}, err
+		}
 	}
 	early := principalPerPeriod.Add(interestPerPeriod).Mul(loan.MoneyFromInt(6))
+	schedule := make([]ScheduleRowView, 0, len(resolved.ContractualSchedule))
+	if resolved.Position.Source == loan.SourceReconstructed {
+		for _, row := range resolved.ContractualSchedule {
+			schedule = append(schedule, ScheduleRowView{
+				Number: row.Number, DueDate: row.DueDate.Time(time.UTC).Format("02/01/2006"),
+				Principal: row.Principal.Format(2), Interest: row.Interest.Format(2), Installment: row.Installment.Format(2), ScheduledBalance: row.ScheduledBalance.Format(2),
+			})
+		}
+	}
 	return ResultView{
 		Loan: resolved.Loan, Position: resolved.Position, PrincipalOutstanding: resolved.Position.PrincipalOutstanding.Format(2),
 		PrincipalDue: resolved.Position.PrincipalDue.Format(2), InterestDue: resolved.Position.InterestDue.Format(2),
 		PenaltyDue:        resolved.Loan.PenaltyDue.Format(2),
 		ContractPrincipal: resolved.Loan.PlafondLimit.Format(2), ReferenceRate: resolved.Loan.ReferenceRatePercent.Format(2),
 		FlatRate: resolved.Loan.FlatRatePercent.Format(2), PeriodicPrincipal: principalPerPeriod.Format(2),
-		PeriodicInterest: interestPerPeriod.Format(2), EarlyTerminationEstimate: early.Format(2), PeriodsAccrued: resolved.Trace.PeriodsAccrued,
-		DueDateCount: len(resolved.Loan.DueDates),
+		PeriodicInterest: interestPerPeriod.Format(2), EarlyTerminationEstimate: early.Format(2),
+		DueDateCount: len(resolved.Loan.ContractSchedule), ContractualSchedule: schedule,
 	}, nil
 }
 
