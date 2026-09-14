@@ -58,6 +58,11 @@ type ContractualInstallment struct {
 	DueDate Date
 }
 
+type ContractualInstallmentEvidence struct {
+	Number     int64
+	RawDueDate string
+}
+
 type ContractualScheduleRow struct {
 	Number           int
 	DueDate          Date
@@ -68,26 +73,27 @@ type ContractualScheduleRow struct {
 }
 
 type ContractData struct {
-	PrimaryAccount        string
-	AlternateAccount      string
-	CIF                   string
-	CustomerName          string
-	Branch                string
-	Product               string
-	PlafondLimit          Money
-	TenorMonths           int
-	FlatRatePercent       Money
-	ReferenceRatePercent  Money
-	CurrentCollectability int
-	CurrentPrincipalDue   Money
-	CurrentInterestDue    Money
-	PenaltyDue            Money
-	Status                string
-	CloseDate             Date
-	ContractChanged       bool
-	RawScheduleCount      int
-	ContractSchedule      []ContractualInstallment
-	Repayments            []Repayment
+	PrimaryAccount           string
+	AlternateAccount         string
+	CIF                      string
+	CustomerName             string
+	Branch                   string
+	Product                  string
+	PlafondLimit             Money
+	TenorMonths              int
+	FlatRatePercent          Money
+	ReferenceRatePercent     Money
+	CurrentCollectability    int
+	CurrentPrincipalDue      Money
+	CurrentInterestDue       Money
+	PenaltyDue               Money
+	Status                   string
+	CloseDate                Date
+	ContractChanged          bool
+	RawScheduleCount         int
+	ContractScheduleEvidence []ContractualInstallmentEvidence
+	ContractSchedule         []ContractualInstallment
+	Repayments               []Repayment
 }
 
 type CalculationInput struct {

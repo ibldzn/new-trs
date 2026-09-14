@@ -1,10 +1,12 @@
 package position
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"log/slog"
+	"slices"
 	"strings"
 	"time"
 
@@ -111,6 +113,13 @@ func (service *Service) GetLoanPosition(ctx context.Context, account string, asO
 		logDecision(ctx, contract, opening.InterestType, selected, reason)
 		return loan.ResolvedPosition{Loan: contract, Position: position}, err
 	}
+	if contract.ContractScheduleEvidence != nil {
+		contract.ContractSchedule, err = normalizeContractSchedule(contract.ContractScheduleEvidence, contract.TenorMonths, service.location)
+		if err != nil {
+			logDecision(ctx, contract, opening.InterestType, "", "invalid_contractual_schedule")
+			return loan.ResolvedPosition{}, err
+		}
+	}
 	if !validSchedule(contract) {
 		logDecision(ctx, contract, opening.InterestType, "", "invalid_contractual_schedule")
 		return loan.ResolvedPosition{}, fmt.Errorf("%w: invalid contractual installment schedule", loan.ErrUnsupportedCalculation)
@@ -187,6 +196,45 @@ func validSchedule(contract loan.ContractData) bool {
 		}
 	}
 	return true
+}
+
+func normalizeContractSchedule(source []loan.ContractualInstallmentEvidence, tenor int, location *time.Location) ([]loan.ContractualInstallment, error) {
+	schedule := make([]loan.ContractualInstallment, 0, len(source))
+	seen := make(map[int64]struct{}, len(source))
+	for _, row := range source {
+		if row.Number < 0 || row.Number > int64(tenor) {
+			return nil, fmt.Errorf("%w: installment number %d outside 0..%d", loan.ErrUnsupportedCalculation, row.Number, tenor)
+		}
+		if row.Number == 0 {
+			continue
+		}
+		if _, duplicate := seen[row.Number]; duplicate {
+			return nil, fmt.Errorf("%w: duplicate contractual installment %d", loan.ErrUnsupportedCalculation, row.Number)
+		}
+		rawDate := strings.TrimSpace(row.RawDueDate)
+		if len(rawDate) >= len(loan.DateLayout) {
+			rawDate = rawDate[:len(loan.DateLayout)]
+		}
+		date, err := loan.ParseDate(rawDate, location)
+		if err != nil {
+			return nil, fmt.Errorf("%w: invalid date for contractual installment %d: %v", loan.ErrUnsupportedCalculation, row.Number, err)
+		}
+		seen[row.Number] = struct{}{}
+		schedule = append(schedule, loan.ContractualInstallment{Number: int(row.Number), DueDate: date})
+	}
+	slices.SortFunc(schedule, func(left, right loan.ContractualInstallment) int { return cmp.Compare(left.Number, right.Number) })
+	if len(schedule) != tenor {
+		return nil, fmt.Errorf("%w: got %d contractual installments for %d-month tenor", loan.ErrUnsupportedCalculation, len(schedule), tenor)
+	}
+	for index, installment := range schedule {
+		if installment.Number != index+1 {
+			return nil, fmt.Errorf("%w: missing contractual installment %d", loan.ErrUnsupportedCalculation, index+1)
+		}
+		if index > 0 && !installment.DueDate.After(schedule[index-1].DueDate) {
+			return nil, fmt.Errorf("%w: contractual installment dates are not strictly chronological", loan.ErrUnsupportedCalculation)
+		}
+	}
+	return schedule, nil
 }
 
 func logDecision(ctx context.Context, contract loan.ContractData, interestType string, source loan.PositionSource, reason string) {

@@ -204,6 +204,32 @@ func TestCalculatorRejectsInvalidEvidence(t *testing.T) {
 	}
 }
 
+func TestCalculatorValidatesRepaymentComponentsAgainstTotal(t *testing.T) {
+	for _, test := range []struct {
+		name                   string
+		principal, interest    string
+		total                  string
+		wantHistoricalEvidence bool
+	}{
+		{name: "components below total", principal: "90", interest: "20", total: "120"},
+		{name: "components equal total", principal: "90", interest: "20", total: "110"},
+		{name: "components exceed total", principal: "900000", interest: "300000", total: "1000000", wantHistoricalEvidence: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			input := baseInput()
+			input.AsOf = date("2025-11-01")
+			input.Repayments = []loan.Repayment{payment("2025-11-01", test.principal, test.interest, test.total)}
+			_, err := (Calculator{}).Calculate(input)
+			if errors.Is(err, loan.ErrHistoricalEvidence) != test.wantHistoricalEvidence {
+				t.Fatalf("error = %v", err)
+			}
+			if err != nil && !test.wantHistoricalEvidence {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
 func TestBuildScheduleUsesContractFormulaAndFinalPrincipalRemainder(t *testing.T) {
 	source := []loan.ContractualInstallment{
 		{Number: 3, DueDate: date("2026-04-01")},

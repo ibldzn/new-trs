@@ -78,12 +78,15 @@ func (calculator Calculator) Calculate(input loan.CalculationInput) (loan.Calcul
 		if payment.Date.IsZero() || payment.PrincipalComponent.IsNegative() || payment.InterestComponent.IsNegative() || payment.PenaltyComponent.IsNegative() || payment.EarlyPenaltyComponent.IsNegative() || payment.DWPComponent.IsNegative() || payment.TotalPayment.IsNegative() {
 			return loan.CalculationResult{}, fmt.Errorf("%w: negative or invalid repayment on %s", loan.ErrUnsupportedCalculation, payment.Date)
 		}
+		amount := payment.PrincipalComponent.Add(payment.InterestComponent)
+		if amount.Cmp(payment.TotalPayment) > 0 {
+			return loan.CalculationResult{}, fmt.Errorf("%w: repayment principal and interest exceed total payment on %s", loan.ErrHistoricalEvidence, payment.Date)
+		}
 		accrueThrough(payment.Date)
 		collectability, err := collectabilityAt(input.Opening.CollectabilityBI, timeline, payment.Date)
 		if err != nil {
 			return loan.CalculationResult{}, err
 		}
-		amount := payment.PrincipalComponent.Add(payment.InterestComponent)
 		if amount.IsZero() {
 			continue
 		}

@@ -1,7 +1,6 @@
 package fincloud
 
 import (
-	"cmp"
 	"context"
 	"encoding/json"
 	"errors"
@@ -9,7 +8,6 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
-	"slices"
 	"strconv"
 	"strings"
 	"time"
@@ -38,6 +36,10 @@ func (value *scalar) UnmarshalJSON(raw []byte) error {
 	if len(raw) > 0 && raw[0] == '"' {
 		return json.Unmarshal(raw, &value.value)
 	}
+	if string(raw) == "true" || string(raw) == "false" {
+		value.value = string(raw)
+		return nil
+	}
 	var number json.Number
 	if err := json.Unmarshal(raw, &number); err != nil {
 		return fmt.Errorf("expected string or number")
@@ -47,28 +49,31 @@ func (value *scalar) UnmarshalJSON(raw []byte) error {
 }
 
 type loanDTO struct {
-	ID                 string        `json:"id"`
-	NoAlt              string        `json:"noalt"`
-	CIF                string        `json:"nocif"`
-	CIFNumber          string        `json:"cifno"`
-	CustomerName       string        `json:"namanasabah"`
-	Branch             string        `json:"rec_dibuat_lokasi"`
-	Product            string        `json:"produkid"`
-	PlafondLimit       scalar        `json:"plafondlimit"`
-	Tenor              scalar        `json:"jangkawaktu"`
-	FlatRate           scalar        `json:"bungaflat"`
-	ReferenceRate      scalar        `json:"produk_sukubunga"`
-	Collectability     int           `json:"kolekbi"`
-	PrincipalDue       scalar        `json:"tunggakanpokok"`
-	InterestDue        scalar        `json:"tunggakanbunga"`
-	PenaltyDue         scalar        `json:"dendatunggakan"`
-	Status             string        `json:"statusrekening"`
-	CloseDate          string        `json:"tgltutup"`
-	Restructured       scalar        `json:"restrukturisasi"`
-	RestructuredStatus scalar        `json:"statusrestrukturisasi"`
-	RestructuredDate   scalar        `json:"tglrestrukturisasi"`
-	Schedule           []scheduleDTO `json:"jadwalangsuran"`
-	Repayments         []struct {
+	ID                         string        `json:"id"`
+	NoAlt                      string        `json:"noalt"`
+	CIF                        string        `json:"nocif"`
+	CIFNumber                  string        `json:"cifno"`
+	CustomerName               string        `json:"namanasabah"`
+	Branch                     string        `json:"rec_dibuat_lokasi"`
+	Product                    string        `json:"produkid"`
+	PlafondLimit               scalar        `json:"plafondlimit"`
+	Tenor                      scalar        `json:"jangkawaktu"`
+	FlatRate                   scalar        `json:"bungaflat"`
+	ReferenceRate              scalar        `json:"produk_sukubunga"`
+	Collectability             int           `json:"kolekbi"`
+	PrincipalDue               scalar        `json:"tunggakanpokok"`
+	InterestDue                scalar        `json:"tunggakanbunga"`
+	PenaltyDue                 scalar        `json:"dendatunggakan"`
+	Status                     string        `json:"statusrekening"`
+	CloseDate                  string        `json:"tgltutup"`
+	RestrukturNoAkadAkhir      scalar        `json:"restruktur_noakad_akhir"`
+	RestrukturTanggalAkhirAkad scalar        `json:"restruktur_tanggalakhirakad"`
+	RestrukturTanggalAwal      scalar        `json:"restruktur_tanggalawal"`
+	RestrukturTanggalAkhir     scalar        `json:"restruktur_tanggalakhir"`
+	RestrukturCara             scalar        `json:"restruktur_cara"`
+	RestrukturFrekuensi        scalar        `json:"restruktur_frekuensi"`
+	Schedule                   []scheduleDTO `json:"jadwalangsuran"`
+	Repayments                 []struct {
 		Date          string `json:"tglbayar"`
 		Principal     scalar `json:"bayar_pokok"`
 		Interest      scalar `json:"bayar_bunga"`
@@ -227,9 +232,9 @@ func mapLoan(source loanDTO, location *time.Location) (loan.ContractData, error)
 			return loan.ContractData{}, errors.Join(loan.ErrFincloudUnavailable, fmt.Errorf("invalid tgltutup: %w", err))
 		}
 	}
-	result.ContractSchedule, err = normalizeContractSchedule(source.Schedule, tenor, location)
-	if err != nil {
-		return loan.ContractData{}, err
+	result.ContractScheduleEvidence = make([]loan.ContractualInstallmentEvidence, len(source.Schedule))
+	for index, row := range source.Schedule {
+		result.ContractScheduleEvidence[index] = loan.ContractualInstallmentEvidence{Number: row.InstallmentNo, RawDueDate: row.Date}
 	}
 	result.Repayments = make([]loan.Repayment, 0, len(source.Repayments))
 	for index, row := range source.Repayments {
@@ -270,41 +275,6 @@ func mapLoan(source loanDTO, location *time.Location) (loan.ContractData, error)
 	return result, nil
 }
 
-func normalizeContractSchedule(source []scheduleDTO, tenor int, location *time.Location) ([]loan.ContractualInstallment, error) {
-	schedule := make([]loan.ContractualInstallment, 0, len(source))
-	seen := make(map[int64]struct{}, len(source))
-	for _, row := range source {
-		if row.InstallmentNo < 0 || row.InstallmentNo > int64(tenor) {
-			return nil, fmt.Errorf("%w: installment number %d outside 0..%d", loan.ErrUnsupportedCalculation, row.InstallmentNo, tenor)
-		}
-		if row.InstallmentNo == 0 {
-			continue
-		}
-		if _, duplicate := seen[row.InstallmentNo]; duplicate {
-			return nil, fmt.Errorf("%w: duplicate contractual installment %d", loan.ErrUnsupportedCalculation, row.InstallmentNo)
-		}
-		date, err := parseDate(row.Date, location)
-		if err != nil {
-			return nil, fmt.Errorf("%w: invalid date for contractual installment %d: %v", loan.ErrUnsupportedCalculation, row.InstallmentNo, err)
-		}
-		seen[row.InstallmentNo] = struct{}{}
-		schedule = append(schedule, loan.ContractualInstallment{Number: int(row.InstallmentNo), DueDate: date})
-	}
-	slices.SortFunc(schedule, func(left, right loan.ContractualInstallment) int { return cmp.Compare(left.Number, right.Number) })
-	if len(schedule) != tenor {
-		return nil, fmt.Errorf("%w: got %d contractual installments for %d-month tenor", loan.ErrUnsupportedCalculation, len(schedule), tenor)
-	}
-	for index, installment := range schedule {
-		if installment.Number != index+1 {
-			return nil, fmt.Errorf("%w: missing contractual installment %d", loan.ErrUnsupportedCalculation, index+1)
-		}
-		if index > 0 && !installment.DueDate.After(schedule[index-1].DueDate) {
-			return nil, fmt.Errorf("%w: contractual installment dates are not strictly chronological", loan.ErrUnsupportedCalculation)
-		}
-	}
-	return schedule, nil
-}
-
 func requiredMoney(field string, value scalar) (loan.Money, error) {
 	if !value.present || strings.TrimSpace(value.value) == "" {
 		return loan.Money{}, errors.Join(loan.ErrFincloudUnavailable, fmt.Errorf("missing %s", field))
@@ -340,7 +310,14 @@ func parseDate(raw string, location *time.Location) (loan.Date, error) {
 }
 
 func contractChanged(source loanDTO) bool {
-	for _, value := range []scalar{source.Restructured, source.RestructuredStatus, source.RestructuredDate} {
+	for _, value := range []scalar{
+		source.RestrukturNoAkadAkhir,
+		source.RestrukturTanggalAkhirAkad,
+		source.RestrukturTanggalAwal,
+		source.RestrukturTanggalAkhir,
+		source.RestrukturCara,
+		source.RestrukturFrekuensi,
+	} {
 		normalized := strings.ToLower(strings.TrimSpace(value.value))
 		if value.present && normalized != "" && normalized != "0" && normalized != "false" && normalized != "tidak" && normalized != "-" {
 			return true

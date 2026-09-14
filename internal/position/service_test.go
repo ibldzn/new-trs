@@ -93,20 +93,25 @@ func TestPositionServiceSelectsAuthoritativeSource(t *testing.T) {
 		asOf                                                                                        string
 		interestType                                                                                string
 		changed                                                                                     bool
+		unusableSchedule                                                                            bool
 		wantSource                                                                                  loan.PositionSource
 		wantMSOHistorical, wantMSOOpening, wantDWHExact, wantTimeline, wantSnapshot, wantCalculator int
 	}{
 		{name: "pre-cutoff uses MSO", asOf: "2025-10-11", interestType: "10", wantSource: loan.SourceMSO, wantMSOHistorical: 1},
 		{name: "cutoff uses MSO opening", asOf: "2025-10-12", interestType: "10", wantSource: loan.SourceMSO, wantMSOOpening: 1},
-		{name: "non-contractual historical uses exact DWH", asOf: "2026-09-13", interestType: "20", wantSource: loan.SourceDWH, wantMSOOpening: 1, wantDWHExact: 1},
+		{name: "non-contractual historical ignores unusable flat schedule", asOf: "2026-09-13", interestType: "20", unusableSchedule: true, wantSource: loan.SourceDWH, wantMSOOpening: 1, wantDWHExact: 1},
 		{name: "non-contractual today uses current snapshot", asOf: "2026-09-14", interestType: "20", wantSource: loan.SourceTodaySnapshot, wantMSOOpening: 1, wantSnapshot: 1},
-		{name: "contract change uses exact DWH", asOf: "2026-09-13", interestType: "10", changed: true, wantSource: loan.SourceDWH, wantMSOOpening: 1, wantDWHExact: 1},
+		{name: "contract change ignores unusable reconstruction schedule", asOf: "2026-09-13", interestType: "10", changed: true, unusableSchedule: true, wantSource: loan.SourceDWH, wantMSOOpening: 1, wantDWHExact: 1},
 		{name: "reconstructed post-cutoff loan", asOf: "2026-09-13", interestType: "10", wantSource: loan.SourceReconstructed, wantMSOOpening: 1, wantTimeline: 1, wantCalculator: 1},
 		{name: "supported today requires snapshot collectability", asOf: "2026-09-14", interestType: "10", wantSource: loan.SourceReconstructed, wantMSOOpening: 1, wantTimeline: 1, wantSnapshot: 1, wantCalculator: 1},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			asOf := parseDate(test.asOf, location)
 			contract := loan.ContractData{PrimaryAccount: "3080020000000094", AlternateAccount: "0130112345", PlafondLimit: loan.MustMoney("100"), TenorMonths: 1, FlatRatePercent: loan.MustMoney("12"), ContractChanged: test.changed, ContractSchedule: []loan.ContractualInstallment{{Number: 1, DueDate: parseDate("2025-11-12", location)}}}
+			if test.unusableSchedule {
+				contract.ContractSchedule = nil
+				contract.ContractScheduleEvidence = []loan.ContractualInstallmentEvidence{{Number: 1, RawDueDate: "bad"}}
+			}
 			fincloud := &fincloudFake{contract: contract}
 			mso := &msoFake{historical: loan.LoanPosition{AccountNumber: "01.301.12345", Source: loan.SourceMSO}, opening: loan.OpeningLoanState{AccountNumber: "01.301.12345", InterestType: test.interestType, PrincipalOutstanding: loan.MustMoney("100"), CollectabilityBI: 2}}
 			dwh := &dwhFake{exact: loan.LoanPosition{Source: loan.SourceDWH}, timeline: []loan.CollectabilityPoint{{Date: parseDate("2026-09-13", location), Value: 3}}}
@@ -164,14 +169,14 @@ func TestPositionServiceRejectsFutureBeforeUpstreamCall(t *testing.T) {
 
 func TestPositionServiceReconstructsNormalizedTenorPlusOneSchedule(t *testing.T) {
 	location := time.FixedZone("Jakarta", 7*60*60)
-	schedule := make([]loan.ContractualInstallment, 60)
+	evidence := make([]loan.ContractualInstallmentEvidence, 61)
 	firstDue := time.Date(2021, time.October, 20, 0, 0, 0, 0, location)
-	for index := range schedule {
-		schedule[index] = loan.ContractualInstallment{Number: index + 1, DueDate: loan.NewDate(firstDue.AddDate(0, index, 0), location)}
+	for index := range evidence {
+		evidence[index] = loan.ContractualInstallmentEvidence{Number: int64(index), RawDueDate: firstDue.AddDate(0, index-1, 0).Format(loan.DateLayout)}
 	}
 	contract := loan.ContractData{
 		PrimaryAccount: "primary", AlternateAccount: "alternate", PlafondLimit: loan.MustMoney("100000000"), TenorMonths: 60,
-		FlatRatePercent: loan.MustMoney("7.8"), RawScheduleCount: 61, ContractSchedule: schedule,
+		FlatRatePercent: loan.MustMoney("7.8"), RawScheduleCount: 61, ContractScheduleEvidence: evidence,
 	}
 	mso := &msoFake{opening: loan.OpeningLoanState{InterestType: FlatInterestType, PrincipalOutstanding: loan.MustMoney("100"), CollectabilityBI: 1}}
 	dwh := &dwhFake{}
@@ -194,16 +199,17 @@ func TestPositionServiceReconstructsNormalizedTenorPlusOneSchedule(t *testing.T)
 
 func TestPositionServiceRejectsInvalidFlatContractSchedule(t *testing.T) {
 	location := time.FixedZone("Jakarta", 7*60*60)
-	contract := loan.ContractData{PrimaryAccount: "primary", AlternateAccount: "alternate", PlafondLimit: loan.MustMoney("100"), TenorMonths: 2, FlatRatePercent: loan.MustMoney("12"), ContractSchedule: []loan.ContractualInstallment{{Number: 1, DueDate: parseDate("2025-11-12", location)}}}
+	contract := loan.ContractData{PrimaryAccount: "primary", AlternateAccount: "alternate", PlafondLimit: loan.MustMoney("100"), TenorMonths: 2, FlatRatePercent: loan.MustMoney("12"), ContractScheduleEvidence: []loan.ContractualInstallmentEvidence{{Number: 1, RawDueDate: "bad"}}}
 	mso := &msoFake{opening: loan.OpeningLoanState{InterestType: FlatInterestType, PrincipalOutstanding: loan.MustMoney("100"), CollectabilityBI: 1}}
 	dwh := &dwhFake{}
+	snapshot := &snapshotFake{}
 	calculator := &calculatorFake{}
-	service, _ := NewService(&fincloudFake{contract: contract}, mso, dwh, &snapshotFake{}, calculator, location)
+	service, _ := NewService(&fincloudFake{contract: contract}, mso, dwh, snapshot, calculator, location)
 	service.now = func() time.Time { return parseDate("2026-09-14", location).Time(location) }
 
 	_, err := service.GetLoanPosition(context.Background(), "primary", parseDate("2026-09-13", location))
-	if !errors.Is(err, loan.ErrUnsupportedCalculation) || dwh.exactCalls != 0 || calculator.calls != 0 {
-		t.Fatalf("error=%v exact=%d calculator=%d", err, dwh.exactCalls, calculator.calls)
+	if !errors.Is(err, loan.ErrUnsupportedCalculation) || dwh.exactCalls != 0 || dwh.timelineCalls != 0 || snapshot.calls != 0 || calculator.calls != 0 {
+		t.Fatalf("error=%v exact=%d timeline=%d snapshot=%d calculator=%d", err, dwh.exactCalls, dwh.timelineCalls, snapshot.calls, calculator.calls)
 	}
 }
 
@@ -237,6 +243,48 @@ func TestPositionServiceRejectsMissingAlternateBeforeMSOLookup(t *testing.T) {
 	_, err := service.GetLoanPosition(context.Background(), "input", parseDate("2025-10-11", location))
 	if !errors.Is(err, loan.ErrHistoricalEvidence) || mso.historicalCalls != 0 || mso.openingCalls != 0 {
 		t.Fatalf("error=%v MSO historical=%d opening=%d", err, mso.historicalCalls, mso.openingCalls)
+	}
+}
+
+func TestNormalizeContractScheduleIgnoresInstallmentZeroAndSorts(t *testing.T) {
+	location := time.FixedZone("Jakarta", 7*60*60)
+	schedule, err := normalizeContractSchedule([]loan.ContractualInstallmentEvidence{
+		{Number: 2, RawDueDate: "2026-03-01"},
+		{Number: 0, RawDueDate: "invalid but excluded"},
+		{Number: 3, RawDueDate: "2026-04-01"},
+		{Number: 1, RawDueDate: "2026-02-01"},
+	}, 3, location)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for index, wantDate := range []string{"2026-02-01", "2026-03-01", "2026-04-01"} {
+		if schedule[index].Number != index+1 || schedule[index].DueDate.String() != wantDate {
+			t.Fatalf("schedule[%d] = %+v", index, schedule[index])
+		}
+	}
+}
+
+func TestNormalizeContractScheduleRejectsInvalidEvidence(t *testing.T) {
+	location := time.FixedZone("Jakarta", 7*60*60)
+	valid := []loan.ContractualInstallmentEvidence{{Number: 0, RawDueDate: "2026-01-01"}, {Number: 1, RawDueDate: "2026-02-01"}, {Number: 2, RawDueDate: "2026-03-01"}, {Number: 3, RawDueDate: "2026-04-01"}}
+	for _, test := range []struct {
+		name string
+		rows []loan.ContractualInstallmentEvidence
+	}{
+		{name: "duplicate installment", rows: append(append([]loan.ContractualInstallmentEvidence(nil), valid...), loan.ContractualInstallmentEvidence{Number: 1, RawDueDate: "2026-02-02"})},
+		{name: "missing installment", rows: []loan.ContractualInstallmentEvidence{{Number: 0, RawDueDate: "2026-01-01"}, {Number: 1, RawDueDate: "2026-02-01"}, {Number: 3, RawDueDate: "2026-04-01"}}},
+		{name: "installment over tenor", rows: append(append([]loan.ContractualInstallmentEvidence(nil), valid...), loan.ContractualInstallmentEvidence{Number: 4, RawDueDate: "2026-05-01"})},
+		{name: "negative installment", rows: append(append([]loan.ContractualInstallmentEvidence(nil), valid...), loan.ContractualInstallmentEvidence{Number: -1, RawDueDate: "2025-12-01"})},
+		{name: "duplicate date", rows: []loan.ContractualInstallmentEvidence{{Number: 0, RawDueDate: "2026-01-01"}, {Number: 1, RawDueDate: "2026-02-01"}, {Number: 2, RawDueDate: "2026-02-01"}, {Number: 3, RawDueDate: "2026-04-01"}}},
+		{name: "non chronological date", rows: []loan.ContractualInstallmentEvidence{{Number: 0, RawDueDate: "2026-01-01"}, {Number: 1, RawDueDate: "2026-03-01"}, {Number: 2, RawDueDate: "2026-02-01"}, {Number: 3, RawDueDate: "2026-04-01"}}},
+		{name: "invalid date", rows: []loan.ContractualInstallmentEvidence{{Number: 0, RawDueDate: "2026-01-01"}, {Number: 1, RawDueDate: "bad"}, {Number: 2, RawDueDate: "2026-03-01"}, {Number: 3, RawDueDate: "2026-04-01"}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			_, err := normalizeContractSchedule(test.rows, 3, location)
+			if !errors.Is(err, loan.ErrUnsupportedCalculation) {
+				t.Fatalf("error = %v", err)
+			}
+		})
 	}
 }
 
