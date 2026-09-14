@@ -51,7 +51,8 @@ type stateRow struct {
 	PrincipalOutstanding loan.Money `db:"principal_outstanding"`
 	PrincipalDue         loan.Money `db:"principal_due"`
 	InterestDue          loan.Money `db:"interest_due"`
-	CollectabilityBI     int        `db:"collectability_bi"`
+	CollectabilityBI     int        `db:"-"`
+	CollectabilityCode   string     `db:"collectability_bi"`
 }
 
 func (repository *Repository) HistoricalPosition(ctx context.Context, account string, asOf loan.Date) (loan.LoanPosition, error) {
@@ -106,8 +107,30 @@ func (repository *Repository) state(ctx context.Context, account string, asOf lo
 		}
 		return stateRow{}, errors.Join(loan.ErrMSOUnavailable, err)
 	}
+	collectability, err := parseCollectabilityBI(row.CollectabilityCode)
+	if err != nil {
+		return stateRow{}, err
+	}
+	row.CollectabilityBI = collectability
 	if row.PrincipalOutstanding.IsNegative() || row.PrincipalDue.IsNegative() || row.InterestDue.IsNegative() || row.PrincipalDue.Cmp(row.PrincipalOutstanding) > 0 || row.CollectabilityBI < 1 || row.CollectabilityBI > 5 {
 		return stateRow{}, fmt.Errorf("%w: invalid MSO loan position", loan.ErrHistoricalEvidence)
 	}
 	return row, nil
+}
+
+func parseCollectabilityBI(value string) (int, error) {
+	switch strings.ToUpper(strings.TrimSpace(value)) {
+	case "1", "L":
+		return 1, nil
+	case "2", "DPK":
+		return 2, nil
+	case "3", "KL":
+		return 3, nil
+	case "4", "D":
+		return 4, nil
+	case "5", "M":
+		return 5, nil
+	default:
+		return 0, fmt.Errorf("%w: invalid MSO collectability %q", loan.ErrHistoricalEvidence, value)
+	}
 }
