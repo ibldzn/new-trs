@@ -36,20 +36,6 @@ func (value *scalar) UnmarshalJSON(raw []byte) error {
 	if len(raw) > 0 && raw[0] == '"' {
 		return json.Unmarshal(raw, &value.value)
 	}
-	if string(raw) == "true" || string(raw) == "false" {
-		value.value = string(raw)
-		return nil
-	}
-	if len(raw) > 0 && raw[0] == '{' {
-		var date struct {
-			Value string `json:"date"`
-		}
-		if err := json.Unmarshal(raw, &date); err != nil || strings.TrimSpace(date.Value) == "" {
-			return fmt.Errorf("expected scalar or Fincloud date object")
-		}
-		value.value = date.Value
-		return nil
-	}
 	var number json.Number
 	if err := json.Unmarshal(raw, &number); err != nil {
 		return fmt.Errorf("expected string or number")
@@ -59,31 +45,25 @@ func (value *scalar) UnmarshalJSON(raw []byte) error {
 }
 
 type loanDTO struct {
-	ID                         string        `json:"id"`
-	NoAlt                      string        `json:"noalt"`
-	CIF                        string        `json:"nocif"`
-	CIFNumber                  string        `json:"cifno"`
-	CustomerName               string        `json:"namanasabah"`
-	Branch                     string        `json:"rec_dibuat_lokasi"`
-	Product                    string        `json:"produkid"`
-	PlafondLimit               scalar        `json:"plafondlimit"`
-	Tenor                      scalar        `json:"jangkawaktu"`
-	FlatRate                   scalar        `json:"bungaflat"`
-	ReferenceRate              scalar        `json:"produk_sukubunga"`
-	Collectability             int           `json:"kolekbi"`
-	PrincipalDue               scalar        `json:"tunggakanpokok"`
-	InterestDue                scalar        `json:"tunggakanbunga"`
-	PenaltyDue                 scalar        `json:"dendatunggakan"`
-	Status                     string        `json:"statusrekening"`
-	CloseDate                  string        `json:"tgltutup"`
-	RestrukturNoAkadAkhir      scalar        `json:"restruktur_noakad_akhir"`
-	RestrukturTanggalAkhirAkad scalar        `json:"restruktur_tanggalakhirakad"`
-	RestrukturTanggalAwal      scalar        `json:"restruktur_tanggalawal"`
-	RestrukturTanggalAkhir     scalar        `json:"restruktur_tanggalakhir"`
-	RestrukturCara             scalar        `json:"restruktur_cara"`
-	RestrukturFrekuensi        scalar        `json:"restruktur_frekuensi"`
-	Schedule                   []scheduleDTO `json:"jadwalangsuran"`
-	Repayments                 []struct {
+	ID             string        `json:"id"`
+	NoAlt          string        `json:"noalt"`
+	CIF            string        `json:"nocif"`
+	CIFNumber      string        `json:"cifno"`
+	CustomerName   string        `json:"namanasabah"`
+	Branch         string        `json:"rec_dibuat_lokasi"`
+	Product        string        `json:"produkid"`
+	PlafondLimit   scalar        `json:"plafondlimit"`
+	Tenor          scalar        `json:"jangkawaktu"`
+	FlatRate       scalar        `json:"bungaflat"`
+	ReferenceRate  scalar        `json:"produk_sukubunga"`
+	Collectability int           `json:"kolekbi"`
+	PrincipalDue   scalar        `json:"tunggakanpokok"`
+	InterestDue    scalar        `json:"tunggakanbunga"`
+	PenaltyDue     scalar        `json:"dendatunggakan"`
+	Status         string        `json:"statusrekening"`
+	CloseDate      string        `json:"tgltutup"`
+	Schedule       []scheduleDTO `json:"jadwalangsuran"`
+	Repayments     []struct {
 		Date          string `json:"tglbayar"`
 		Principal     scalar `json:"bayar_pokok"`
 		Interest      scalar `json:"bayar_bunga"`
@@ -231,7 +211,7 @@ func mapLoan(source loanDTO, location *time.Location) (loan.ContractData, error)
 		CustomerName: strings.TrimSpace(source.CustomerName), Branch: strings.TrimSpace(source.Branch), Product: strings.TrimSpace(source.Product),
 		PlafondLimit: principal, TenorMonths: tenor, FlatRatePercent: flatRate, ReferenceRatePercent: referenceRate,
 		CurrentCollectability: source.Collectability, CurrentPrincipalDue: principalDue, CurrentInterestDue: interestDue,
-		PenaltyDue: penaltyDue, Status: strings.TrimSpace(source.Status), ContractChanged: contractChanged(source), RawScheduleCount: len(source.Schedule),
+		PenaltyDue: penaltyDue, Status: strings.TrimSpace(source.Status), RawScheduleCount: len(source.Schedule),
 	}
 	if result.CIF == "" {
 		result.CIF = strings.TrimSpace(source.CIFNumber)
@@ -317,23 +297,6 @@ func parseDate(raw string, location *time.Location) (loan.Date, error) {
 		raw = raw[:len(loan.DateLayout)]
 	}
 	return loan.ParseDate(raw, location)
-}
-
-func contractChanged(source loanDTO) bool {
-	for _, value := range []scalar{
-		source.RestrukturNoAkadAkhir,
-		source.RestrukturTanggalAkhirAkad,
-		source.RestrukturTanggalAwal,
-		source.RestrukturTanggalAkhir,
-		source.RestrukturCara,
-		source.RestrukturFrekuensi,
-	} {
-		normalized := strings.ToLower(strings.TrimSpace(value.value))
-		if value.present && normalized != "" && normalized != "0" && normalized != "false" && normalized != "tidak" && normalized != "-" {
-			return true
-		}
-	}
-	return false
 }
 
 func NormalizeDecimal(raw string) (string, error) {

@@ -44,35 +44,18 @@ func TestMapLoanKeepsOnlyFincloudScheduleNumberAndDateAsContractualTruth(t *test
 	}
 }
 
-func TestMapLoanUsesActualRestructuringFields(t *testing.T) {
-	for _, test := range []struct {
-		name     string
-		metadata string
-		changed  bool
-	}{
-		{name: "unchanged", metadata: `"restruktur_noakad_akhir":"","restruktur_tanggalakhirakad":null,"restruktur_tanggalawal":"0","restruktur_tanggalakhir":"false","restruktur_cara":"tidak","restruktur_frekuensi":"-","restrukturisasi":"1"`},
-		{name: "boolean false", metadata: `"restruktur_cara":false`},
-		{name: "final agreement", metadata: `"restruktur_noakad_akhir":"AKAD-R-2026-01"`, changed: true},
-		{name: "agreement end date object", metadata: `"restruktur_tanggalakhirakad":{"date":"2030-06-30 00:00:00.000000","timezone_type":3,"timezone":"Asia/Jakarta"}`, changed: true},
-		{name: "restructure start", metadata: `"restruktur_tanggalawal":"2026-01-15"`, changed: true},
-		{name: "restructure end", metadata: `"restruktur_tanggalakhir":"2028-01-15"`, changed: true},
-		{name: "method", metadata: `"restruktur_cara":"Perpanjangan tenor"`, changed: true},
-		{name: "frequency", metadata: `"restruktur_frekuensi":2`, changed: true},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			var source loanDTO
-			raw := `{"id":"primary","plafondlimit":"100","jangkawaktu":"3 bulan","bungaflat":"12",` + test.metadata + `}`
-			if err := json.Unmarshal([]byte(raw), &source); err != nil {
-				t.Fatal(err)
-			}
-			contract, err := mapLoan(source, time.FixedZone("Jakarta", 7*60*60))
-			if err != nil {
-				t.Fatal(err)
-			}
-			if contract.ContractChanged != test.changed {
-				t.Fatalf("ContractChanged = %t", contract.ContractChanged)
-			}
-		})
+func TestMapLoanIgnoresRestructuringMetadata(t *testing.T) {
+	var source loanDTO
+	raw := `{"id":"primary","plafondlimit":"100","jangkawaktu":"1 bulan","bungaflat":"12","restruktur_tanggalakhirakad":{"date":"2023-10-30 00:00:00.000000","timezone_type":3,"timezone":"Asia/Jakarta"},"jadwalangsuran":[{"angsuranke":1,"tanggal":"2025-11-12"}]}`
+	if err := json.Unmarshal([]byte(raw), &source); err != nil {
+		t.Fatal(err)
+	}
+	contract, err := mapLoan(source, time.FixedZone("Jakarta", 7*60*60))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if contract.PrimaryAccount != "primary" || len(contract.ContractScheduleEvidence) != 1 {
+		t.Fatalf("contract = %+v", contract)
 	}
 }
 

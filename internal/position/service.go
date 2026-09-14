@@ -98,19 +98,13 @@ func (service *Service) GetLoanPosition(ctx context.Context, account string, asO
 		logDecision(ctx, contract, opening.InterestType, loan.SourceMSO, "cutoff_opening")
 		return loan.ResolvedPosition{Loan: contract, Position: openingPosition(opening, asOf)}, nil
 	}
-	reason := ""
 	if opening.InterestType != FlatInterestType {
-		reason = "non_flat_interest_type"
-	} else if contract.ContractChanged {
-		reason = "contract_changed"
-	}
-	if reason != "" {
 		position, err := service.exactPosition(ctx, primary, asOf, today)
 		selected := loan.SourceDWH
 		if asOf.Equal(today) {
 			selected = loan.SourceTodaySnapshot
 		}
-		logDecision(ctx, contract, opening.InterestType, selected, reason)
+		logDecision(ctx, contract, opening.InterestType, selected, "non_flat_interest_type")
 		return loan.ResolvedPosition{Loan: contract, Position: position}, err
 	}
 	if contract.ContractScheduleEvidence != nil {
@@ -242,7 +236,6 @@ func logDecision(ctx context.Context, contract loan.ContractData, interestType s
 		"primary_account", contract.PrimaryAccount,
 		"alternate_account", contract.AlternateAccount,
 		"mso_interest_type", interestType,
-		"contract_changed", contract.ContractChanged,
 		"tenor_months", contract.TenorMonths,
 		"raw_fincloud_schedule_rows", contract.RawScheduleCount,
 		"normalized_contractual_schedule_count", len(contract.ContractSchedule),

@@ -3,9 +3,12 @@ package position
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
+	"github.com/ibldzn/trs/internal/fincloud"
 	"github.com/ibldzn/trs/internal/loan"
 )
 
@@ -92,7 +95,6 @@ func TestPositionServiceSelectsAuthoritativeSource(t *testing.T) {
 		name                                                                                        string
 		asOf                                                                                        string
 		interestType                                                                                string
-		changed                                                                                     bool
 		unusableSchedule                                                                            bool
 		wantSource                                                                                  loan.PositionSource
 		wantMSOHistorical, wantMSOOpening, wantDWHExact, wantTimeline, wantSnapshot, wantCalculator int
@@ -101,13 +103,12 @@ func TestPositionServiceSelectsAuthoritativeSource(t *testing.T) {
 		{name: "cutoff uses MSO opening", asOf: "2025-10-12", interestType: "10", wantSource: loan.SourceMSO, wantMSOOpening: 1},
 		{name: "non-contractual historical ignores unusable flat schedule", asOf: "2026-09-13", interestType: "20", unusableSchedule: true, wantSource: loan.SourceDWH, wantMSOOpening: 1, wantDWHExact: 1},
 		{name: "non-contractual today uses current snapshot", asOf: "2026-09-14", interestType: "20", wantSource: loan.SourceTodaySnapshot, wantMSOOpening: 1, wantSnapshot: 1},
-		{name: "contract change ignores unusable reconstruction schedule", asOf: "2026-09-13", interestType: "10", changed: true, unusableSchedule: true, wantSource: loan.SourceDWH, wantMSOOpening: 1, wantDWHExact: 1},
 		{name: "reconstructed post-cutoff loan", asOf: "2026-09-13", interestType: "10", wantSource: loan.SourceReconstructed, wantMSOOpening: 1, wantTimeline: 1, wantCalculator: 1},
 		{name: "supported today requires snapshot collectability", asOf: "2026-09-14", interestType: "10", wantSource: loan.SourceReconstructed, wantMSOOpening: 1, wantTimeline: 1, wantSnapshot: 1, wantCalculator: 1},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			asOf := parseDate(test.asOf, location)
-			contract := loan.ContractData{PrimaryAccount: "3080020000000094", AlternateAccount: "0130112345", PlafondLimit: loan.MustMoney("100"), TenorMonths: 1, FlatRatePercent: loan.MustMoney("12"), ContractChanged: test.changed, ContractSchedule: []loan.ContractualInstallment{{Number: 1, DueDate: parseDate("2025-11-12", location)}}}
+			contract := loan.ContractData{PrimaryAccount: "3080020000000094", AlternateAccount: "0130112345", PlafondLimit: loan.MustMoney("100"), TenorMonths: 1, FlatRatePercent: loan.MustMoney("12"), ContractSchedule: []loan.ContractualInstallment{{Number: 1, DueDate: parseDate("2025-11-12", location)}}}
 			if test.unusableSchedule {
 				contract.ContractSchedule = nil
 				contract.ContractScheduleEvidence = []loan.ContractualInstallmentEvidence{{Number: 1, RawDueDate: "bad"}}
@@ -153,6 +154,43 @@ func TestPositionServiceSelectsAuthoritativeSource(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestPositionServiceReconstructsFlatLoanWithPreCutoffRestructuringMetadata(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/admin/access/login":
+			_, _ = writer.Write([]byte(`{"status":"ok","data":{"result":{"sessionid":"session"}}}`))
+		case "/pinjaman/inquiry/rekening/pinjaman":
+			_, _ = writer.Write([]byte(`{"status":"ok","data":{"result":{"id":"primary","noalt":"0130112345","plafondlimit":"100","jangkawaktu":"1 bulan","bungaflat":"12","restruktur_tanggalakhirakad":{"date":"2023-10-30 00:00:00.000000","timezone_type":3,"timezone":"Asia/Jakarta"},"jadwalangsuran":[{"angsuranke":1,"tanggal":"2025-11-12"}]}}}`))
+		case "/admin/access/logout":
+			writer.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	client, err := fincloud.NewClient(fincloud.Config{BaseURL: server.URL, Username: "system", Password: "secret", LocationID: "000", RoleID: "R-1", HTTPClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close(context.Background())
+
+	location := time.FixedZone("Jakarta", 7*60*60)
+	mso := &msoFake{opening: loan.OpeningLoanState{InterestType: FlatInterestType, PrincipalOutstanding: loan.MustMoney("100"), CollectabilityBI: 1}}
+	dwh := &dwhFake{}
+	snapshot := &snapshotFake{}
+	calculator := &calculatorFake{result: loan.CalculationResult{PrincipalOutstanding: loan.MustMoney("75"), CollectabilityBI: 1}}
+	service, _ := NewService(client, mso, dwh, snapshot, calculator, location)
+	service.now = func() time.Time { return parseDate("2026-09-14", location).Time(location) }
+
+	result, err := service.GetLoanPosition(context.Background(), "primary", parseDate("2026-09-13", location))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.Position.Source != loan.SourceReconstructed || calculator.calls != 1 || dwh.exactCalls != 0 || dwh.timelineCalls != 1 || snapshot.calls != 0 {
+		t.Fatalf("source=%s calculator=%d exact=%d timeline=%d snapshot=%d", result.Position.Source, calculator.calls, dwh.exactCalls, dwh.timelineCalls, snapshot.calls)
 	}
 }
 
