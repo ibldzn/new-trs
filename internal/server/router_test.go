@@ -12,9 +12,11 @@ import (
 
 	"github.com/go-chi/chi/v5"
 
+	"github.com/ibldzn/trs/internal/api"
 	"github.com/ibldzn/trs/internal/audit"
 	"github.com/ibldzn/trs/internal/auth"
 	"github.com/ibldzn/trs/internal/browserauth"
+	"github.com/ibldzn/trs/internal/loan"
 	"github.com/ibldzn/trs/internal/render"
 	"github.com/ibldzn/trs/internal/user"
 	webfiles "github.com/ibldzn/trs/web"
@@ -23,6 +25,12 @@ import (
 type fakeAuthentication struct {
 	principal browserauth.Principal
 	resolved  int
+}
+
+type fakeAPIPositions struct{}
+
+func (fakeAPIPositions) GetLoanPosition(context.Context, string, loan.Date) (loan.ResolvedPosition, error) {
+	return loan.ResolvedPosition{Loan: loan.ContractData{PrimaryAccount: "primary"}}, nil
 }
 
 func (*fakeAuthentication) Login(context.Context, browserauth.LoginInput, time.Time) (browserauth.LoginResult, error) {
@@ -89,7 +97,46 @@ func TestStaticAndCrossOriginBoundaries(t *testing.T) {
 	}
 }
 
-func testRouter(t *testing.T, service *fakeAuthentication, register func(chi.Router)) (http.Handler, string) {
+func TestAPIRouteIsolation(t *testing.T) {
+	service := &fakeAuthentication{principal: browserauth.Principal{UserID: 1, Username: "admin", Actor: browserauth.Identity{UserID: 1, Username: "admin"}}}
+	path := "/api/v1/loans/primary/contractual?as_of=2026-01-01"
+	disabled, _ := testRouter(t, service, nil)
+	response := httptest.NewRecorder()
+	disabled.ServeHTTP(response, httptest.NewRequest(http.MethodGet, path, nil))
+	if response.Code != http.StatusNotFound {
+		t.Fatalf("disabled API status=%d", response.Code)
+	}
+
+	apiHandler := api.NewHandler(fakeAPIPositions{}, time.UTC, "test-secret", nil, nil)
+	router, session := testRouter(t, service, func(router chi.Router) {
+		router.Get("/admin-only", func(writer http.ResponseWriter, _ *http.Request) { writer.WriteHeader(http.StatusNoContent) })
+	}, apiHandler.RegisterRoutes)
+	request := httptest.NewRequest(http.MethodGet, path, nil)
+	request.Header.Set("Authorization", "Bearer test-secret")
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusOK || service.resolved != 0 || response.Header().Get("Cache-Control") != "no-store" || response.Header().Get("X-Frame-Options") != "DENY" {
+		t.Fatalf("API status=%d browser resolutions=%d headers=%v", response.Code, service.resolved, response.Header())
+	}
+
+	request = httptest.NewRequest(http.MethodGet, path, nil)
+	request.AddCookie(&http.Cookie{Name: "session", Value: session})
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code != http.StatusUnauthorized || service.resolved != 0 {
+		t.Fatalf("browser session substituted for key: status=%d resolutions=%d", response.Code, service.resolved)
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/admin-only", nil)
+	request.Header.Set("Authorization", "Bearer test-secret")
+	response = httptest.NewRecorder()
+	router.ServeHTTP(response, request)
+	if response.Code == http.StatusNoContent || service.resolved != 0 {
+		t.Fatalf("API key granted web access: status=%d resolutions=%d", response.Code, service.resolved)
+	}
+}
+
+func testRouter(t *testing.T, service *fakeAuthentication, register func(chi.Router), registerAPI ...func(chi.Router)) (http.Handler, string) {
 	t.Helper()
 	renderer, err := render.New(webfiles.Files, false)
 	if err != nil {
@@ -107,5 +154,9 @@ func testRouter(t *testing.T, service *fakeAuthentication, register func(chi.Rou
 	if err != nil {
 		t.Fatal(err)
 	}
-	return NewRouter(RouterDependencies{StaticFiles: staticFiles, Authentication: authentication, RegisterAuthenticated: register, Errors: errors}), token
+	dependencies := RouterDependencies{StaticFiles: staticFiles, Authentication: authentication, RegisterAuthenticated: register, Errors: errors}
+	if len(registerAPI) != 0 {
+		dependencies.RegisterAPI = registerAPI[0]
+	}
+	return NewRouter(dependencies), token
 }

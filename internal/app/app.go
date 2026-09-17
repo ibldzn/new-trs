@@ -11,6 +11,7 @@ import (
 	"github.com/go-chi/chi/v5"
 
 	"github.com/ibldzn/trs/internal/access"
+	"github.com/ibldzn/trs/internal/api"
 	"github.com/ibldzn/trs/internal/audit"
 	"github.com/ibldzn/trs/internal/auth"
 	"github.com/ibldzn/trs/internal/browserauth"
@@ -193,10 +194,15 @@ func Run(ctx context.Context) error {
 		return fmt.Errorf("initialize admin navigation: %w", err)
 	}
 	adminHTTP := adminshell.New(renderer, navigationRegistry, applicationConfig.App.Name, errorResponder)
+	var registerAPI func(chi.Router)
+	if applicationConfig.APIKey != "" {
+		registerAPI = api.NewHandler(positionService, location, applicationConfig.APIKey, appendAudit, logger).RegisterRoutes
+	}
 	handler := server.NewRouter(server.RouterDependencies{
 		StaticFiles:       staticFiles,
 		AllowRegistration: applicationConfig.App.AllowRegistration,
 		Authentication:    authenticationHTTP,
+		RegisterAPI:       registerAPI,
 		RegisterAuthenticated: func(router chi.Router) {
 			registerFeatureRoutes(router, featureDependencies{
 				database: databaseConnection, users: userRepository, access: accessRepository,

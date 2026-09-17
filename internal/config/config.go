@@ -32,6 +32,7 @@ const (
 
 type Config struct {
 	App       AppConfig
+	APIKey    string
 	Database  DatabaseConfig
 	Session   SessionConfig
 	DWH       ExternalDatabaseConfig
@@ -178,6 +179,7 @@ func parse(lookup lookupEnv) (Config, error) {
 	}
 
 	config := Config{
+		APIKey: strings.TrimSpace(value("THOR_API_KEY", "")),
 		App: AppConfig{
 			Name:              strings.TrimSpace(value("APP_NAME", defaultAppName)),
 			Environment:       strings.TrimSpace(value("APP_ENV", defaultAppEnvironment)),

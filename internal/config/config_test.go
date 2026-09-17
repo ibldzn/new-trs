@@ -25,8 +25,18 @@ func TestParseDefaults(t *testing.T) {
 	if config.Session.Lifetime != 24*time.Hour || config.Session.RememberLifetime != 30*24*time.Hour {
 		t.Fatalf("unexpected session defaults: %+v", config.Session)
 	}
+	if config.APIKey != "" {
+		t.Fatalf("API should be disabled by default")
+	}
 	if config.Snapshot.RefreshInterval != 3*time.Hour || !config.Snapshot.RefreshOnStart || config.Reporting.Concurrency != 8 {
 		t.Fatalf("unexpected integration defaults: snapshot=%+v reporting=%+v", config.Snapshot, config.Reporting)
+	}
+}
+
+func TestParseAPIKey(t *testing.T) {
+	config, err := parse(mapLookup(baseValues("THOR_API_KEY", "example-secret")))
+	if err != nil || config.APIKey != "example-secret" {
+		t.Fatalf("API key was not loaded: %v", err)
 	}
 }
 

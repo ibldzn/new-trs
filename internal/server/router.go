@@ -15,6 +15,7 @@ type RouterDependencies struct {
 	StaticFiles           fs.FS
 	AllowRegistration     bool
 	Authentication        *browserauth.HTTP
+	RegisterAPI           func(chi.Router)
 	RegisterAuthenticated func(chi.Router)
 	Errors                *render.ErrorResponder
 }
@@ -31,6 +32,12 @@ func NewRouter(dependencies RouterDependencies) http.Handler {
 		writer.WriteHeader(http.StatusOK)
 		_, _ = writer.Write([]byte("{\"status\":\"ok\"}\n"))
 	})
+	if dependencies.RegisterAPI != nil {
+		router.Route("/api/v1", func(api chi.Router) {
+			api.Use(noStore)
+			dependencies.RegisterAPI(api)
+		})
+	}
 
 	router.Handle("/static/*", http.StripPrefix("/static/", http.FileServer(http.FS(dependencies.StaticFiles))))
 

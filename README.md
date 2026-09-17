@@ -27,6 +27,31 @@ Set application DB, read-only DWH/MSO DSNs, and Fincloud system credentials in `
 
 `MSO_INTEREST_TYPE_QUERY` and `MSO_DEBTOR_TYPE_QUERY` must be read-only `SELECT` statements with one `?` placeholder. Related operations fail clearly when either query is required but absent.
 
+## Internal loan API
+
+Set `THOR_API_KEY` to enable `GET /api/v1/loans/{account}/contractual?as_of=YYYY-MM-DD`. An empty key leaves the API disabled. Callers send `Authorization: Bearer <THOR_API_KEY>`; they do not provide Fincloud credentials. TRS uses its configured Fincloud system account and the same `position.Service` as existing business flows.
+
+`account` may be a primary or alternate Fincloud account. `as_of` controls contractual outstanding only. `repayment_history` contains full Fincloud repayment history, including payments after `as_of`. Financial JSON values are numbers with two decimal places.
+
+```sh
+curl -H 'Authorization: Bearer example-secret' \
+  'http://localhost:8080/api/v1/loans/3080010000000123/contractual?as_of=2026-08-31'
+```
+
+Example response (fake data):
+
+```json
+{
+  "requested_account": "3080010000000123",
+  "primary_account": "3080010000000456",
+  "as_of": "2026-08-31",
+  "contract_rate": 12.50,
+  "contractual_outstanding": 93456789.12,
+  "position_source": "DWH",
+  "repayment_history": [{"payment_date":"2026-09-01","principal":1000000.00,"interest":120000.00,"penalty":0.00,"early_termination_penalty":0.00,"dwp":0.00,"total_payment":1120000.00,"journal_number":"J-12345"}]
+}
+```
+
 ## Commands
 
 ```sh

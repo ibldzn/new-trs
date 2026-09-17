@@ -32,6 +32,7 @@ const (
 	ActionRolePermissionsUpdated   Action = "role.permissions_updated"
 	ActionAdminBootstrap           Action = "admin.bootstrap"
 	ActionLoanInquiry              Action = "loan.inquiry"
+	ActionAPILoanLookup            Action = "api.loan_lookup"
 	ActionReportingGenerate        Action = "reporting.generate"
 	ActionLPSGenerate              Action = "lps.generate"
 	ActionSnapshotRefreshStarted   Action = "snapshot.refresh.started"
@@ -52,8 +53,9 @@ type Identity struct {
 }
 
 type Attribution struct {
-	Actor     *Identity
-	Effective *Identity
+	Actor       *Identity
+	Effective   *Identity
+	SystemActor string
 }
 
 type Metadata interface {
@@ -100,6 +102,16 @@ type LoanInquiryMetadata struct {
 }
 
 func (LoanInquiryMetadata) auditMetadata() {}
+
+type APILoanLookupMetadata struct {
+	RequestedAccount string `json:"requested_account"`
+	PrimaryAccount   string `json:"primary_account,omitempty"`
+	AsOf             string `json:"as_of"`
+	Outcome          string `json:"outcome"`
+	RequestID        string `json:"request_id,omitempty"`
+}
+
+func (APILoanLookupMetadata) auditMetadata() {}
 
 type ReportingMetadata struct {
 	AsOf     string `json:"as_of"`
@@ -149,6 +161,9 @@ func Append(ctx context.Context, executor sqlx.ExtContext, event Event) error {
 	if err := validateIdentity("effective", event.Attribution.Effective); err != nil {
 		return err
 	}
+	if event.Attribution.SystemActor != "" && (!strings.HasPrefix(event.Attribution.SystemActor, "system:") || event.Attribution.Actor != nil || event.Attribution.Effective != nil) {
+		return fmt.Errorf("system actor must use system: prefix without user identities")
+	}
 	if (event.Resource == "") != (event.ResourceID == 0) {
 		return fmt.Errorf("audit resource type and ID must be set together")
 	}
@@ -172,6 +187,9 @@ func Append(ctx context.Context, executor sqlx.ExtContext, event Event) error {
 	if event.Attribution.Actor != nil {
 		actorID = event.Attribution.Actor.UserID
 		actorUsername = event.Attribution.Actor.Username
+	}
+	if event.Attribution.SystemActor != "" {
+		actorUsername = event.Attribution.SystemActor
 	}
 	if event.Attribution.Effective != nil {
 		effectiveID = event.Attribution.Effective.UserID
@@ -227,6 +245,7 @@ func knownAction(action Action) bool {
 		ActionRolePermissionsUpdated,
 		ActionAdminBootstrap,
 		ActionLoanInquiry,
+		ActionAPILoanLookup,
 		ActionReportingGenerate,
 		ActionLPSGenerate,
 		ActionSnapshotRefreshStarted,
