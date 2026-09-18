@@ -628,6 +628,24 @@ func TestFirstFailureStopsSchedulingAndPublishesNoOutput(t *testing.T) {
 	}
 }
 
+func TestSafeFailurePrefersHistoricalEvidence(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		err  error
+		want string
+	}{
+		{"account absent", loan.ErrNotFound, "account not found"},
+		{"historical evidence absent", loan.ErrHistoricalEvidence, "historical evidence unavailable"},
+		{"joined historical absence", errors.Join(loan.ErrNotFound, loan.ErrHistoricalEvidence), "historical evidence unavailable"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			if got := safeFailure(test.err); got != test.want {
+				t.Fatalf("safeFailure(%v)=%q want=%q", test.err, got, test.want)
+			}
+		})
+	}
+}
+
 func TestSLIKClosedLoanAndReversalResults(t *testing.T) {
 	readSheet := func(path string) []byte {
 		archive, err := zip.OpenReader(path)
@@ -653,7 +671,7 @@ func TestSLIKClosedLoanAndReversalResults(t *testing.T) {
 		positions := positionFunc(func(_ context.Context, account string, asOf loan.Date) (loan.ResolvedPosition, error) {
 			closeDate, _ := loan.ParseDate("2026-08-20", time.UTC)
 			return loan.ResolvedPosition{
-				Loan:     loan.ContractData{PrimaryAccount: account, CloseDate: closeDate, FlatRatePercent: loan.MustMoney("18")},
+				Loan:     loan.ContractData{PrimaryAccount: account, CloseDate: closeDate, FlatRatePercent: loan.MustMoney("11.76")},
 				Position: loan.LoanPosition{AsOf: asOf, AccountNumber: account, Source: loan.SourceClosed},
 			}, nil
 		})
@@ -664,7 +682,7 @@ func TestSLIKClosedLoanAndReversalResults(t *testing.T) {
 		store.mu.Lock()
 		value := store.accounts[job.ID]["A"]
 		store.mu.Unlock()
-		if value.Balance != "0.00" || value.Rate != "18" {
+		if value.Balance != "0.00" || value.Rate != "11.76" {
 			t.Fatalf("stored values=%+v", value)
 		}
 		file, _, err := manager.OpenOutput(context.Background(), job.ID, 7, false)
@@ -675,7 +693,7 @@ func TestSLIKClosedLoanAndReversalResults(t *testing.T) {
 		file.Close()
 		before, after := readSheet(input), readSheet(output)
 		if !bytes.Equal(maskTargets(t, before), maskTargets(t, after)) ||
-			!bytes.Contains(after, []byte(`<t>0.00</t>`)) || !bytes.Contains(after, []byte(`<t>18</t>`)) {
+			!bytes.Contains(after, []byte(`<t>0.00</t>`)) || !bytes.Contains(after, []byte(`<t>11.76</t>`)) {
 			t.Fatalf("closed workbook changed outside balance/rate or missed values: %s", after)
 		}
 	})

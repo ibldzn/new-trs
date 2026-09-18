@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -58,6 +59,64 @@ func TestPositionServiceClosedAsOfSkipsHistoricalDependencies(t *testing.T) {
 					resolved, fincloud.calls, mso.historicalCalls, mso.openingCalls, dwh.exactCalls, dwh.timelineCalls, snapshot.calls, calculator.calls)
 			}
 		})
+	}
+}
+
+func TestPositionServiceClosedAlternateFromFincloudDateObject(t *testing.T) {
+	const alternate, primary = "0123456789", "3000000000000001"
+	var detailCalls, searchCalls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		switch request.URL.Path {
+		case "/admin/access/login":
+			_, _ = writer.Write([]byte(`{"status":"ok","data":{"result":{"sessionid":"session"}}}`))
+		case "/pinjaman/inquiry/rekening/pinjaman":
+			detailCalls.Add(1)
+			switch request.URL.Query().Get("id") {
+			case alternate:
+				_, _ = writer.Write([]byte(`{"status":"ok","data":{"result":{}}}`))
+			case primary:
+				_, _ = writer.Write([]byte(`{"status":"ok","data":{"result":{"id":"3000000000000001","noalt":"0123456789","plafondlimit":"100","jangkawaktu":"1 bulan","bungaflat":"11.76","kolekbi":2,"statusrekening":"Closed","tgl_tutup":{"date":"2026-08-20 00:00:00.000000","timezone_type":3,"timezone":"Asia/Jakarta"}}}}`))
+			default:
+				http.NotFound(writer, request)
+			}
+		case "/pinjaman/inquiry/rekening/cari":
+			searchCalls.Add(1)
+			if request.URL.Query().Get("cabang") != "ALL" || request.URL.Query().Get("noalt") != alternate || request.URL.Query().Get("pagesize") != "50" {
+				t.Errorf("unexpected alternate search query: %s", request.URL.RawQuery)
+			}
+			_, _ = writer.Write([]byte(`{"status":"ok","data":{"result":[{"id":"3000000000000001","noalt":""}]}}`))
+		case "/admin/access/logout":
+			writer.WriteHeader(http.StatusNoContent)
+		default:
+			http.NotFound(writer, request)
+		}
+	}))
+	defer server.Close()
+	client, err := fincloud.NewClient(fincloud.Config{BaseURL: server.URL, Username: "system", Password: "secret", LocationID: "000", RoleID: "R-1", HTTPClient: server.Client()})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close(context.Background())
+
+	location := time.FixedZone("Jakarta", 7*60*60)
+	mso, dwh, snapshot, calculator := &msoFake{}, &dwhFake{}, &snapshotFake{}, &calculatorFake{}
+	service, err := NewService(client, mso, dwh, snapshot, calculator, location)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service.now = func() time.Time { return parseDate("2026-09-14", location).Time(location) }
+	resolved, err := service.GetLoanPosition(context.Background(), alternate, parseDate("2026-08-31", location))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.Loan.PrimaryAccount != primary || resolved.Loan.AlternateAccount != alternate || resolved.Loan.CloseDate.String() != "2026-08-20" ||
+		resolved.Loan.FlatRatePercent.Cmp(loan.MustMoney("11.76")) != 0 || resolved.Position.Source != loan.SourceClosed ||
+		resolved.Position.AccountNumber != primary || resolved.Position.CollectabilityBI != 2 ||
+		!resolved.Position.PrincipalOutstanding.IsZero() || !resolved.Position.PrincipalDue.IsZero() || !resolved.Position.InterestDue.IsZero() ||
+		detailCalls.Load() != 2 || searchCalls.Load() != 1 || mso.historicalCalls != 0 || mso.openingCalls != 0 ||
+		dwh.exactCalls != 0 || dwh.timelineCalls != 0 || snapshot.calls != 0 || calculator.calls != 0 {
+		t.Fatalf("resolved=%+v calls: detail=%d search=%d MSO=%d/%d DWH=%d/%d snapshot=%d calculator=%d",
+			resolved, detailCalls.Load(), searchCalls.Load(), mso.historicalCalls, mso.openingCalls, dwh.exactCalls, dwh.timelineCalls, snapshot.calls, calculator.calls)
 	}
 }
 

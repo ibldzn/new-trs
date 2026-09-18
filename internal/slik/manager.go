@@ -602,10 +602,10 @@ func safeFailure(err error) string {
 		return "DWH evidence unavailable"
 	case errors.Is(err, loan.ErrCurrentSnapshot):
 		return "current snapshot unavailable"
-	case errors.Is(err, loan.ErrNotFound):
-		return "account not found"
 	case errors.Is(err, loan.ErrHistoricalEvidence):
 		return "historical evidence unavailable"
+	case errors.Is(err, loan.ErrNotFound):
+		return "account not found"
 	case errors.Is(err, context.DeadlineExceeded):
 		return "upstream timeout"
 	case errors.Is(err, loan.ErrUnsupportedRepaymentReversal):

@@ -27,6 +27,10 @@ type scheduleDTO struct {
 	InstallmentNo int64  `json:"angsuranke"`
 }
 
+type dateObjectDTO struct {
+	Date string `json:"date"`
+}
+
 func (value *scalar) UnmarshalJSON(raw []byte) error {
 	value.present = true
 	if string(raw) == "null" {
@@ -45,25 +49,26 @@ func (value *scalar) UnmarshalJSON(raw []byte) error {
 }
 
 type loanDTO struct {
-	ID             string        `json:"id"`
-	NoAlt          string        `json:"noalt"`
-	CIF            string        `json:"nocif"`
-	CIFNumber      string        `json:"cifno"`
-	CustomerName   string        `json:"namanasabah"`
-	Branch         string        `json:"rec_dibuat_lokasi"`
-	Product        string        `json:"produkid"`
-	PlafondLimit   scalar        `json:"plafondlimit"`
-	Tenor          scalar        `json:"jangkawaktu"`
-	FlatRate       scalar        `json:"bungaflat"`
-	ReferenceRate  scalar        `json:"produk_sukubunga"`
-	Collectability int           `json:"kolekbi"`
-	PrincipalDue   scalar        `json:"tunggakanpokok"`
-	InterestDue    scalar        `json:"tunggakanbunga"`
-	PenaltyDue     scalar        `json:"dendatunggakan"`
-	Status         string        `json:"statusrekening"`
-	CloseDate      string        `json:"tgltutup"`
-	Schedule       []scheduleDTO `json:"jadwalangsuran"`
-	Repayments     []struct {
+	ID              string        `json:"id"`
+	NoAlt           string        `json:"noalt"`
+	CIF             string        `json:"nocif"`
+	CIFNumber       string        `json:"cifno"`
+	CustomerName    string        `json:"namanasabah"`
+	Branch          string        `json:"rec_dibuat_lokasi"`
+	Product         string        `json:"produkid"`
+	PlafondLimit    scalar        `json:"plafondlimit"`
+	Tenor           scalar        `json:"jangkawaktu"`
+	FlatRate        scalar        `json:"bungaflat"`
+	ReferenceRate   scalar        `json:"produk_sukubunga"`
+	Collectability  int           `json:"kolekbi"`
+	PrincipalDue    scalar        `json:"tunggakanpokok"`
+	InterestDue     scalar        `json:"tunggakanbunga"`
+	PenaltyDue      scalar        `json:"dendatunggakan"`
+	Status          string        `json:"statusrekening"`
+	CloseDateLegacy string        `json:"tgltutup"`
+	CloseDateObject dateObjectDTO `json:"tgl_tutup"`
+	Schedule        []scheduleDTO `json:"jadwalangsuran"`
+	Repayments      []struct {
 		Date          string `json:"tglbayar"`
 		Principal     scalar `json:"bayar_pokok"`
 		Interest      scalar `json:"bayar_bunga"`
@@ -216,8 +221,21 @@ func mapLoan(source loanDTO, location *time.Location) (loan.ContractData, error)
 	if result.CIF == "" {
 		result.CIF = strings.TrimSpace(source.CIFNumber)
 	}
-	if strings.TrimSpace(source.CloseDate) != "" {
-		result.CloseDate, err = parseDate(source.CloseDate, location)
+	objectDate := strings.TrimSpace(source.CloseDateObject.Date)
+	legacyDate := strings.TrimSpace(source.CloseDateLegacy)
+	if objectDate != "" {
+		result.CloseDate, err = parseDate(objectDate, location)
+		if err != nil {
+			return loan.ContractData{}, errors.Join(loan.ErrFincloudUnavailable, fmt.Errorf("invalid tgl_tutup.date: %w", err))
+		}
+		if legacyDate != "" {
+			legacy, legacyErr := parseDate(legacyDate, location)
+			if legacyErr == nil && !legacy.Equal(result.CloseDate) {
+				return loan.ContractData{}, errors.Join(loan.ErrFincloudUnavailable, fmt.Errorf("conflicting tgltutup and tgl_tutup dates"))
+			}
+		}
+	} else if legacyDate != "" {
+		result.CloseDate, err = parseDate(legacyDate, location)
 		if err != nil {
 			return loan.ContractData{}, errors.Join(loan.ErrFincloudUnavailable, fmt.Errorf("invalid tgltutup: %w", err))
 		}

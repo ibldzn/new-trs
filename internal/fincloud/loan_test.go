@@ -2,6 +2,8 @@ package fincloud
 
 import (
 	"encoding/json"
+	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -23,6 +25,39 @@ func TestNormalizeDecimalPreservesSALAKSeparatorRules(t *testing.T) {
 	}
 	if _, err := NormalizeDecimal("12x"); err == nil {
 		t.Fatal("malformed decimal accepted")
+	}
+}
+
+func TestMapLoanCloseDateForms(t *testing.T) {
+	for _, test := range []struct {
+		name, fields, wantDate, wantError string
+	}{
+		{"legacy string", `,"tgltutup":"2026-08-20"`, "2026-08-20", ""},
+		{"live object", `,"tgl_tutup":{"date":"2026-08-20 00:00:00.000000","timezone_type":3,"timezone":"Asia/Jakarta"}`, "2026-08-20", ""},
+		{"neither field despite closed status", "", "", ""},
+		{"both same calendar date", `,"tgltutup":"2026-08-20","tgl_tutup":{"date":"2026-08-20 23:59:59.000000"}`, "2026-08-20", ""},
+		{"empty object falls back to legacy", `,"tgltutup":"2026-08-20","tgl_tutup":{"date":""}`, "2026-08-20", ""},
+		{"conflicting dates", `,"tgltutup":"2026-08-21","tgl_tutup":{"date":"2026-08-20 00:00:00.000000"}`, "", "conflicting tgltutup and tgl_tutup"},
+		{"malformed object date", `,"tgl_tutup":{"date":"2026-02-30 00:00:00.000000"}`, "", "invalid tgl_tutup.date"},
+		{"malformed object does not fall back", `,"tgltutup":"2026-08-20","tgl_tutup":{"date":"bad"}`, "", "invalid tgl_tutup.date"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var source loanDTO
+			raw := `{"id":"primary","plafondlimit":"100","jangkawaktu":"1 bulan","bungaflat":"11.76","statusrekening":"Closed"` + test.fields + `}`
+			if err := json.Unmarshal([]byte(raw), &source); err != nil {
+				t.Fatal(err)
+			}
+			contract, err := mapLoan(source, time.FixedZone("Jakarta", 7*60*60))
+			if test.wantError != "" {
+				if !errors.Is(err, loan.ErrFincloudUnavailable) || !strings.Contains(err.Error(), test.wantError) {
+					t.Fatalf("error=%v", err)
+				}
+				return
+			}
+			if err != nil || contract.CloseDate.String() != test.wantDate {
+				t.Fatalf("close date=%s want=%s error=%v", contract.CloseDate, test.wantDate, err)
+			}
+		})
 	}
 }
 
