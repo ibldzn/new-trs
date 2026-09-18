@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"testing"
 	"time"
+
+	"github.com/ibldzn/trs/internal/loan"
 )
 
 func TestNormalizeDecimalPreservesSALAKSeparatorRules(t *testing.T) {
@@ -70,5 +72,25 @@ func TestMapLoanDefersInvalidScheduleEvidence(t *testing.T) {
 	}
 	if len(contract.ContractScheduleEvidence) != 1 || contract.ContractScheduleEvidence[0].RawDueDate != "bad" {
 		t.Fatalf("evidence = %+v", contract.ContractScheduleEvidence)
+	}
+}
+
+func TestMapLoanPreservesClosedRateAndSignedRepaymentHistory(t *testing.T) {
+	var source loanDTO
+	raw := `{"id":"primary","noalt":"alternate","plafondlimit":"1000000","jangkawaktu":"12 Month","bungaflat":"18","tgltutup":"2026-08-31","historybayar":[{"tglbayar":"2026-08-20","bayar_pokok":"300,000.00","bayar_bunga":"0.00","bayar_denda":"0.00","bayar_dendapelunasan":"0.00","nominaldwp":"0.00","totalbayar":"300,000.00","nojurnal":"original"},{"tglbayar":"2026-08-20","bayar_pokok":"-300,000.00","bayar_bunga":"0.00","bayar_denda":"0.00","bayar_dendapelunasan":"0.00","nominaldwp":"0.00","totalbayar":"-300,000.00","nojurnal":"different"}]}`
+	if err := json.Unmarshal([]byte(raw), &source); err != nil {
+		t.Fatal(err)
+	}
+	contract, err := mapLoan(source, time.FixedZone("Jakarta", 7*60*60))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if contract.CloseDate.String() != "2026-08-31" || contract.FlatRatePercent.Cmp(loan.MustMoney("18")) != 0 ||
+		len(contract.Repayments) != 2 || contract.Repayments[0].PrincipalComponent.Cmp(loan.MustMoney("300000")) != 0 ||
+		contract.Repayments[1].PrincipalComponent.Cmp(loan.MustMoney("-300000")) != 0 ||
+		contract.Repayments[1].TotalPayment.Cmp(loan.MustMoney("-300000")) != 0 ||
+		contract.Repayments[0].SourceOrder != 0 || contract.Repayments[1].SourceOrder != 1 ||
+		contract.Repayments[0].JournalNumber == contract.Repayments[1].JournalNumber {
+		t.Fatalf("closed mapping lost rate, date, signs, or order: %+v", contract)
 	}
 }

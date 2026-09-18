@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 	"time"
 
@@ -14,12 +15,89 @@ import (
 
 type fincloudFake struct {
 	contract loan.ContractData
+	err      error
 	calls    int
 }
 
 func (fake *fincloudFake) ResolveLoan(context.Context, string, *time.Location) (loan.ContractData, error) {
 	fake.calls++
-	return fake.contract, nil
+	return fake.contract, fake.err
+}
+
+func TestPositionServiceClosedAsOfSkipsHistoricalDependencies(t *testing.T) {
+	location := time.FixedZone("Jakarta", 7*60*60)
+	for _, test := range []struct{ name, closeDate, asOf string }{
+		{"closed before as-of", "2026-08-20", "2026-08-31"},
+		{"closed on as-of", "2026-08-31", "2026-08-31"},
+		{"closed today", "2026-09-03", "2026-09-14"},
+		{"closed before cutoff", "2025-10-11", "2025-10-11"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			contract := loan.ContractData{
+				PrimaryAccount: "primary", FlatRatePercent: loan.MustMoney("18"),
+				CloseDate: parseDate(test.closeDate, location), CurrentCollectability: 5, Status: "Closed",
+				ContractScheduleEvidence: []loan.ContractualInstallmentEvidence{{Number: 1, RawDueDate: "invalid"}},
+				Repayments:               []loan.Repayment{{PrincipalComponent: loan.MustMoney("-300000"), TotalPayment: loan.MustMoney("-300000")}},
+			}
+			fincloud := &fincloudFake{contract: contract}
+			mso, dwh, snapshot, calculator := &msoFake{}, &dwhFake{}, &snapshotFake{}, &calculatorFake{}
+			service, _ := NewService(fincloud, mso, dwh, snapshot, calculator, location)
+			service.now = func() time.Time { return parseDate("2026-09-14", location).Time(location) }
+			asOf := parseDate(test.asOf, location)
+			resolved, err := service.GetLoanPosition(context.Background(), "input", asOf)
+			if err != nil {
+				t.Fatal(err)
+			}
+			position := resolved.Position
+			if !reflect.DeepEqual(resolved.Loan, contract) || position.Source != loan.SourceClosed || !position.AsOf.Equal(asOf) ||
+				position.AccountNumber != "primary" || position.CollectabilityBI != 5 ||
+				!position.PrincipalOutstanding.IsZero() || !position.PrincipalDue.IsZero() || !position.InterestDue.IsZero() ||
+				fincloud.calls != 1 || mso.historicalCalls != 0 || mso.openingCalls != 0 ||
+				dwh.exactCalls != 0 || dwh.timelineCalls != 0 || snapshot.calls != 0 || calculator.calls != 0 {
+				t.Fatalf("resolved=%+v calls: Fincloud=%d MSO=%d/%d DWH=%d/%d snapshot=%d calculator=%d",
+					resolved, fincloud.calls, mso.historicalCalls, mso.openingCalls, dwh.exactCalls, dwh.timelineCalls, snapshot.calls, calculator.calls)
+			}
+		})
+	}
+}
+
+func TestPositionServiceFutureOrAbsentCloseUsesHistoricalCalculation(t *testing.T) {
+	location := time.FixedZone("Jakarta", 7*60*60)
+	for _, test := range []struct{ name, closeDate string }{
+		{"closure after as-of", "2026-09-03"},
+		{"no closure", ""},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			contract := loan.ContractData{PrimaryAccount: "primary", AlternateAccount: "0130112345", FlatRatePercent: loan.MustMoney("18"),
+				PlafondLimit: loan.MustMoney("100"), TenorMonths: 1,
+				ContractSchedule: []loan.ContractualInstallment{{Number: 1, DueDate: parseDate("2025-11-12", location)}}}
+			if test.closeDate != "" {
+				contract.CloseDate = parseDate(test.closeDate, location)
+			}
+			mso := &msoFake{opening: loan.OpeningLoanState{InterestType: FlatInterestType, PrincipalOutstanding: loan.MustMoney("100"), CollectabilityBI: 1}}
+			dwh, snapshot := &dwhFake{}, &snapshotFake{}
+			calculator := &calculatorFake{result: loan.CalculationResult{PrincipalOutstanding: loan.MustMoney("55"), CollectabilityBI: 1}}
+			service, _ := NewService(&fincloudFake{contract: contract}, mso, dwh, snapshot, calculator, location)
+			service.now = func() time.Time { return parseDate("2026-09-14", location).Time(location) }
+			resolved, err := service.GetLoanPosition(context.Background(), "input", parseDate("2026-08-31", location))
+			if err != nil || resolved.Position.Source != loan.SourceReconstructed || resolved.Position.PrincipalOutstanding.Cmp(loan.MustMoney("55")) != 0 ||
+				mso.openingCalls != 1 || dwh.timelineCalls != 1 || calculator.calls != 1 {
+				t.Fatalf("resolved=%+v err=%v calls: MSO=%d DWH=%d calculator=%d", resolved, err, mso.openingCalls, dwh.timelineCalls, calculator.calls)
+			}
+		})
+	}
+}
+
+func TestPositionServiceNotFoundRemainsError(t *testing.T) {
+	location := time.FixedZone("Jakarta", 7*60*60)
+	fincloud := &fincloudFake{err: loan.ErrNotFound}
+	mso, dwh, snapshot, calculator := &msoFake{}, &dwhFake{}, &snapshotFake{}, &calculatorFake{}
+	service, _ := NewService(fincloud, mso, dwh, snapshot, calculator, location)
+	service.now = func() time.Time { return parseDate("2026-09-14", location).Time(location) }
+	_, err := service.GetLoanPosition(context.Background(), "missing", parseDate("2026-08-31", location))
+	if !errors.Is(err, loan.ErrNotFound) || fincloud.calls != 1 || mso.openingCalls != 0 || dwh.timelineCalls != 0 || snapshot.calls != 0 || calculator.calls != 0 {
+		t.Fatalf("error=%v calls: Fincloud=%d MSO=%d DWH=%d snapshot=%d calculator=%d", err, fincloud.calls, mso.openingCalls, dwh.timelineCalls, snapshot.calls, calculator.calls)
+	}
 }
 
 type msoFake struct {

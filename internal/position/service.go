@@ -76,6 +76,12 @@ func (service *Service) GetLoanPosition(ctx context.Context, account string, asO
 	if primary == "" {
 		return loan.ResolvedPosition{}, fmt.Errorf("%w: resolved primary account is empty", loan.ErrInvariant)
 	}
+	if !contract.CloseDate.IsZero() && !contract.CloseDate.After(asOf) {
+		logDecision(ctx, contract, "", loan.SourceClosed, "closed_as_of")
+		return loan.ResolvedPosition{Loan: contract, Position: loan.LoanPosition{
+			AsOf: asOf, AccountNumber: primary, CollectabilityBI: contract.CurrentCollectability, Source: loan.SourceClosed,
+		}}, nil
+	}
 	alternate := strings.TrimSpace(contract.AlternateAccount)
 	if alternate == "" {
 		return loan.ResolvedPosition{}, fmt.Errorf("%w: resolved alternate MSO account is empty", loan.ErrHistoricalEvidence)

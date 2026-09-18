@@ -2,6 +2,7 @@ package slik
 
 import (
 	"archive/zip"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -17,8 +18,34 @@ import (
 	"time"
 
 	"github.com/ibldzn/trs/internal/audit"
+	"github.com/ibldzn/trs/internal/contractual"
 	"github.com/ibldzn/trs/internal/loan"
 )
+
+type positionFunc func(context.Context, string, loan.Date) (loan.ResolvedPosition, error)
+
+func (function positionFunc) GetLoanPosition(ctx context.Context, account string, asOf loan.Date) (loan.ResolvedPosition, error) {
+	return function(ctx, account, asOf)
+}
+
+func syntheticReversalPositions(rows []loan.Repayment) positionFunc {
+	return func(_ context.Context, account string, asOf loan.Date) (loan.ResolvedPosition, error) {
+		cutoff, _ := loan.ParseDate("2025-10-12", time.UTC)
+		result, err := (contractual.Calculator{}).Calculate(loan.CalculationInput{
+			AsOf: asOf, Cutoff: cutoff, ContractualPrincipal: loan.MustMoney("100"), TenorMonths: 1,
+			FlatRatePercent:  loan.MustMoney("18"),
+			Opening:          loan.OpeningLoanState{PrincipalOutstanding: loan.MustMoney("100"), CollectabilityBI: 1},
+			ContractSchedule: []loan.ContractualInstallment{{Number: 1, DueDate: asOf}}, Repayments: rows,
+		})
+		if err != nil {
+			return loan.ResolvedPosition{}, err
+		}
+		return loan.ResolvedPosition{
+			Loan:     loan.ContractData{PrimaryAccount: account, FlatRatePercent: loan.MustMoney("18"), Repayments: rows},
+			Position: loan.LoanPosition{AsOf: asOf, AccountNumber: account, PrincipalOutstanding: result.PrincipalOutstanding, Source: loan.SourceReconstructed},
+		}, nil
+	}
+}
 
 type memoryStore struct {
 	mu        sync.Mutex
@@ -599,6 +626,96 @@ func TestFirstFailureStopsSchedulingAndPublishesNoOutput(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(manager.config.StorageDir, job.ID+".output.xlsx")); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("partial output exists: %v", err)
 	}
+}
+
+func TestSLIKClosedLoanAndReversalResults(t *testing.T) {
+	readSheet := func(path string) []byte {
+		archive, err := zip.OpenReader(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer archive.Close()
+		for _, part := range archive.File {
+			if part.Name == "xl/worksheets/sheet1.xml" {
+				data, err := readPart(part)
+				if err != nil {
+					t.Fatal(err)
+				}
+				return data
+			}
+		}
+		t.Fatal("worksheet missing")
+		return nil
+	}
+
+	t.Run("closed loan keeps Fincloud rate and unrelated cells", func(t *testing.T) {
+		store := newMemoryStore()
+		positions := positionFunc(func(_ context.Context, account string, asOf loan.Date) (loan.ResolvedPosition, error) {
+			closeDate, _ := loan.ParseDate("2026-08-20", time.UTC)
+			return loan.ResolvedPosition{
+				Loan:     loan.ContractData{PrimaryAccount: account, CloseDate: closeDate, FlatRatePercent: loan.MustMoney("18")},
+				Position: loan.LoanPosition{AsOf: asOf, AccountNumber: account, Source: loan.SourceClosed},
+			}, nil
+		})
+		manager := testManager(t, store, positions, 1, t.TempDir())
+		input := accountsWorkbook(t, []string{"A"})
+		job := submitWorkbook(t, manager, input)
+		job = waitJobStatus(t, manager, job.ID, "COMPLETED")
+		store.mu.Lock()
+		value := store.accounts[job.ID]["A"]
+		store.mu.Unlock()
+		if value.Balance != "0.00" || value.Rate != "18" {
+			t.Fatalf("stored values=%+v", value)
+		}
+		file, _, err := manager.OpenOutput(context.Background(), job.ID, 7, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		output := file.Name()
+		file.Close()
+		before, after := readSheet(input), readSheet(output)
+		if !bytes.Equal(maskTargets(t, before), maskTargets(t, after)) ||
+			!bytes.Contains(after, []byte(`<t>0.00</t>`)) || !bytes.Contains(after, []byte(`<t>18</t>`)) {
+			t.Fatalf("closed workbook changed outside balance/rate or missed values: %s", after)
+		}
+	})
+
+	date, _ := loan.ParseDate("2026-08-31", time.UTC)
+	positive := loan.Repayment{Date: date, PrincipalComponent: loan.MustMoney("300000"), TotalPayment: loan.MustMoney("300000"), SourceOrder: 0}
+	negative := loan.Repayment{Date: date, PrincipalComponent: loan.MustMoney("-300000"), TotalPayment: loan.MustMoney("-300000"), SourceOrder: 1}
+	t.Run("exact reversal completes", func(t *testing.T) {
+		store := newMemoryStore()
+		manager := testManager(t, store, syntheticReversalPositions([]loan.Repayment{positive, negative}), 1, t.TempDir())
+		job := submitWorkbook(t, manager, accountsWorkbook(t, []string{"A"}))
+		job = waitJobStatus(t, manager, job.ID, "COMPLETED")
+		store.mu.Lock()
+		value := store.accounts[job.ID]["A"]
+		store.mu.Unlock()
+		if value.Balance != "100.00" || value.Rate != "18" || job.OutputFile == "" {
+			t.Fatalf("job=%+v values=%+v", job, value)
+		}
+	})
+	t.Run("unsupported reversal fails fast", func(t *testing.T) {
+		store := newMemoryStore()
+		var callsMu sync.Mutex
+		calls := make(map[string]int)
+		calculate := syntheticReversalPositions([]loan.Repayment{negative})
+		positions := positionFunc(func(ctx context.Context, account string, asOf loan.Date) (loan.ResolvedPosition, error) {
+			callsMu.Lock()
+			calls[account]++
+			callsMu.Unlock()
+			return calculate(ctx, account, asOf)
+		})
+		manager := testManager(t, store, positions, 1, t.TempDir())
+		job := submitWorkbook(t, manager, accountsWorkbook(t, []string{"A", "B"}))
+		job = waitJobStatus(t, manager, job.ID, "FAILED")
+		callsMu.Lock()
+		secondCalls := calls["B"]
+		callsMu.Unlock()
+		if job.FailedAccount != "A" || job.FailureReason != "unsupported repayment reversal" || job.OutputFile != "" || secondCalls != 0 {
+			t.Fatalf("job=%+v second account calls=%d", job, secondCalls)
+		}
+	})
 }
 
 func TestCancelStopsInFlight(t *testing.T) {

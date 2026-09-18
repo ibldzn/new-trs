@@ -197,6 +197,31 @@ func TestMoneyNumber(t *testing.T) {
 	}
 }
 
+func TestClosedPositionKeepsSignedRepaymentHistory(t *testing.T) {
+	asOf := loan.NewDate(time.Now().AddDate(0, 0, -1), time.UTC)
+	positive := loan.Repayment{Date: asOf, PrincipalComponent: loan.MustMoney("300000"), TotalPayment: loan.MustMoney("300000"), SourceOrder: 0}
+	negative := loan.Repayment{Date: asOf, PrincipalComponent: loan.MustMoney("-300000"), TotalPayment: loan.MustMoney("-300000"), SourceOrder: 1}
+	positions := &fakePositions{result: loan.ResolvedPosition{
+		Loan:     loan.ContractData{PrimaryAccount: "primary", FlatRatePercent: loan.MustMoney("18"), Repayments: []loan.Repayment{negative, positive}},
+		Position: loan.LoanPosition{AsOf: asOf, AccountNumber: "primary", Source: loan.SourceClosed},
+	}}
+	response := requestAPI(testAPI(positions, nil), "/api/v1/loans/primary/contractual?as_of="+asOf.String(), "Bearer test-secret")
+	if response.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", response.Code, response.Body.String())
+	}
+	body := response.Body.String()
+	for _, want := range []string{`"contract_rate":18.00`, `"contractual_outstanding":0.00`, `"position_source":"closed"`,
+		`"principal":300000.00`, `"principal":-300000.00`, `"total_payment":-300000.00`} {
+		if !strings.Contains(body, want) {
+			t.Fatalf("missing %s in %s", want, body)
+		}
+	}
+	if strings.Index(body, `"principal":300000.00`) >= strings.Index(body, `"principal":-300000.00`) ||
+		positions.result.Loan.Repayments[0].PrincipalComponent.Cmp(loan.MustMoney("-300000")) != 0 {
+		t.Fatalf("repayment history reordered or mutated: %s", body)
+	}
+}
+
 func TestPositionErrorMapping(t *testing.T) {
 	for _, test := range []struct {
 		err    error
@@ -207,6 +232,7 @@ func TestPositionErrorMapping(t *testing.T) {
 		{loan.ErrNotFound, 404, "not_found"},
 		{loan.ErrAmbiguousAccountResolution, 409, "ambiguous_account"},
 		{loan.ErrUnsupportedCalculation, 422, "unsupported_calculation"},
+		{loan.ErrUnsupportedRepaymentReversal, 422, "unsupported_calculation"},
 		{loan.ErrFincloudUnavailable, 503, "service_unavailable"},
 		{loan.ErrFincloudCredentials, 503, "service_unavailable"},
 		{loan.ErrFincloudSession, 503, "service_unavailable"},

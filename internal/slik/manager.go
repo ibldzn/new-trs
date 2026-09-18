@@ -608,6 +608,8 @@ func safeFailure(err error) string {
 		return "historical evidence unavailable"
 	case errors.Is(err, context.DeadlineExceeded):
 		return "upstream timeout"
+	case errors.Is(err, loan.ErrUnsupportedRepaymentReversal):
+		return "unsupported repayment reversal"
 	case errors.Is(err, loan.ErrUnsupportedCalculation):
 		return "unsupported calculation"
 	case errors.Is(err, loan.ErrInvalidInput):

@@ -49,8 +49,10 @@ func (calculator Calculator) Calculate(input loan.CalculationInput) (loan.Calcul
 	if err := validateTimeline(timeline); err != nil {
 		return loan.CalculationResult{}, err
 	}
-	repayments := append([]loan.Repayment(nil), input.Repayments...)
-	slices.SortStableFunc(repayments, func(left, right loan.Repayment) int { return compareDate(left.Date, right.Date) })
+	repayments, err := effectiveRepayments(input.Repayments, input.Cutoff, input.AsOf)
+	if err != nil {
+		return loan.CalculationResult{}, err
+	}
 
 	nextDue := 0
 	for nextDue < len(schedule) && !schedule[nextDue].DueDate.After(input.Cutoff) {
@@ -72,12 +74,6 @@ func (calculator Calculator) Calculate(input loan.CalculationInput) (loan.Calcul
 	}
 
 	for _, payment := range repayments {
-		if !payment.Date.After(input.Cutoff) || payment.Date.After(input.AsOf) {
-			continue
-		}
-		if payment.Date.IsZero() {
-			return loan.CalculationResult{}, fmt.Errorf("%w: negative or invalid repayment on %s", loan.ErrUnsupportedCalculation, payment.Date)
-		}
 		amount := payment.PrincipalComponent.Add(payment.InterestComponent)
 		if amount.Cmp(payment.TotalPayment) > 0 {
 			return loan.CalculationResult{}, fmt.Errorf("%w: repayment principal and interest exceed total payment on %s", loan.ErrHistoricalEvidence, payment.Date)
@@ -102,6 +98,53 @@ func (calculator Calculator) Calculate(input loan.CalculationInput) (loan.Calcul
 	}
 	result.CollectabilityBI = collectability
 	return finish(result, state)
+}
+
+func effectiveRepayments(source []loan.Repayment, cutoff, asOf loan.Date) ([]loan.Repayment, error) {
+	repayments := make([]loan.Repayment, 0, len(source))
+	for _, payment := range source {
+		if payment.Date.After(cutoff) && !payment.Date.After(asOf) {
+			repayments = append(repayments, payment)
+		}
+	}
+	slices.SortStableFunc(repayments, func(left, right loan.Repayment) int {
+		if order := compareDate(left.Date, right.Date); order != 0 {
+			return order
+		}
+		return cmp.Compare(left.SourceOrder, right.SourceOrder)
+	})
+	effective := repayments[:0]
+	for index := 0; index < len(repayments); index++ {
+		payment := repayments[index]
+		if repaymentHasNegative(payment) {
+			return nil, fmt.Errorf("%w on %s (source order %d)", loan.ErrUnsupportedRepaymentReversal, payment.Date, payment.SourceOrder)
+		}
+		if index+1 < len(repayments) && repaymentHasNegative(repayments[index+1]) {
+			next := repayments[index+1]
+			if payment.TotalPayment.IsPositive() && payment.Date.Equal(next.Date) && exactRepaymentInverse(payment, next) {
+				index++
+				continue
+			}
+			return nil, fmt.Errorf("%w on %s (source order %d)", loan.ErrUnsupportedRepaymentReversal, next.Date, next.SourceOrder)
+		}
+		effective = append(effective, payment)
+	}
+	return effective, nil
+}
+
+func repaymentHasNegative(payment loan.Repayment) bool {
+	return payment.PrincipalComponent.IsNegative() || payment.InterestComponent.IsNegative() ||
+		payment.PenaltyComponent.IsNegative() || payment.EarlyPenaltyComponent.IsNegative() ||
+		payment.DWPComponent.IsNegative() || payment.TotalPayment.IsNegative()
+}
+
+func exactRepaymentInverse(positive, negative loan.Repayment) bool {
+	return positive.PrincipalComponent.Add(negative.PrincipalComponent).IsZero() &&
+		positive.InterestComponent.Add(negative.InterestComponent).IsZero() &&
+		positive.PenaltyComponent.Add(negative.PenaltyComponent).IsZero() &&
+		positive.EarlyPenaltyComponent.Add(negative.EarlyPenaltyComponent).IsZero() &&
+		positive.DWPComponent.Add(negative.DWPComponent).IsZero() &&
+		positive.TotalPayment.Add(negative.TotalPayment).IsZero()
 }
 
 func (calculator Calculator) BuildSchedule(principal loan.Money, tenor int, flatRate loan.Money, source []loan.ContractualInstallment) ([]loan.ContractualScheduleRow, error) {

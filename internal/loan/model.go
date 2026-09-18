@@ -9,6 +9,7 @@ const (
 	SourceDWH           PositionSource = "DWH"
 	SourceTodaySnapshot PositionSource = "current_snapshot"
 	SourceReconstructed PositionSource = "reconstructed"
+	SourceClosed        PositionSource = "closed"
 )
 
 type LoanPosition struct {
