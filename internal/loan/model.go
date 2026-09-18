@@ -90,6 +90,7 @@ type ContractData struct {
 	PenaltyDue               Money
 	Status                   string
 	CloseDate                Date
+	DisbursementDate         Date
 	RawScheduleCount         int
 	ContractScheduleEvidence []ContractualInstallmentEvidence
 	ContractSchedule         []ContractualInstallment

@@ -78,10 +78,10 @@ Production binary: `bin/trs`.
 
 ## Data rules
 
-- Dates before `2025-10-12` use MSO.
-- `2025-10-12` uses MSO EOD opening state.
-- Later eligible flat loans reconstruct from MSO opening state, Fincloud schedule dates/repayments, and historical collectability.
-- Historical exact positions use DWH. Today exact position/collectability uses local snapshot.
+- Closed-as-of loans have zero balance before source routing.
+- Loans disbursed by `2025-10-12` retain MSO historical/opening rules; later eligible flat positions reconstruct from the MSO opening, Fincloud schedule dates/repayments, and historical collectability.
+- Loans disbursed after `2025-10-12` use exact DWH positions for historical dates and the local snapshot for today, without MSO. A reporting date before disbursement is unsupported.
+- Post-cutoff routing requires Fincloud disbursement-date evidence. Historical exact positions use DWH; today uses the local snapshot.
 - Missing evidence returns an error. No current Fincloud balance fallback exists.
 
 ## Unresolved production validation

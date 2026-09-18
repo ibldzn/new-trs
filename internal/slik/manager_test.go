@@ -697,6 +697,36 @@ func TestSLIKClosedLoanAndReversalResults(t *testing.T) {
 			t.Fatalf("closed workbook changed outside balance/rate or missed values: %s", after)
 		}
 	})
+	t.Run("Fincloud-native historical position keeps DWH balance and Fincloud rate", func(t *testing.T) {
+		store := newMemoryStore()
+		positions := positionFunc(func(_ context.Context, account string, asOf loan.Date) (loan.ResolvedPosition, error) {
+			return loan.ResolvedPosition{
+				Loan:     loan.ContractData{PrimaryAccount: account, FlatRatePercent: loan.MustMoney("12.50")},
+				Position: loan.LoanPosition{AsOf: asOf, AccountNumber: account, PrincipalOutstanding: loan.MustMoney("76543210"), Source: loan.SourceDWH},
+			}, nil
+		})
+		manager := testManager(t, store, positions, 1, t.TempDir())
+		input := accountsWorkbook(t, []string{"A"})
+		job := submitWorkbook(t, manager, input)
+		job = waitJobStatus(t, manager, job.ID, "COMPLETED")
+		store.mu.Lock()
+		value := store.accounts[job.ID]["A"]
+		store.mu.Unlock()
+		if value.Balance != "76543210.00" || value.Rate != "12.5" {
+			t.Fatalf("stored values=%+v", value)
+		}
+		file, _, err := manager.OpenOutput(context.Background(), job.ID, 7, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		output := file.Name()
+		file.Close()
+		before, after := readSheet(input), readSheet(output)
+		if !bytes.Equal(maskTargets(t, before), maskTargets(t, after)) ||
+			!bytes.Contains(after, []byte(`<t>76543210.00</t>`)) || !bytes.Contains(after, []byte(`<t>12.5</t>`)) {
+			t.Fatalf("native workbook changed outside balance/rate or missed values: %s", after)
+		}
+	})
 
 	date, _ := loan.ParseDate("2026-08-31", time.UTC)
 	positive := loan.Repayment{Date: date, PrincipalComponent: loan.MustMoney("300000"), TotalPayment: loan.MustMoney("300000"), SourceOrder: 0}

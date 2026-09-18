@@ -82,6 +82,23 @@ func (service *Service) GetLoanPosition(ctx context.Context, account string, asO
 			AsOf: asOf, AccountNumber: primary, CollectabilityBI: contract.CurrentCollectability, Source: loan.SourceClosed,
 		}}, nil
 	}
+	if !contract.DisbursementDate.IsZero() && contract.DisbursementDate.After(service.cutoff) && asOf.Before(contract.DisbursementDate) {
+		return loan.ResolvedPosition{}, fmt.Errorf("%w: reporting date precedes Fincloud-native disbursement", loan.ErrHistoricalEvidence)
+	}
+	if !asOf.Before(service.cutoff) {
+		if contract.DisbursementDate.IsZero() {
+			return loan.ResolvedPosition{}, fmt.Errorf("%w: Fincloud disbursement date is missing", loan.ErrHistoricalEvidence)
+		}
+		if contract.DisbursementDate.After(service.cutoff) {
+			position, err := service.exactPosition(ctx, primary, asOf, today)
+			selected, reason := loan.SourceDWH, "fincloud_native_historical"
+			if asOf.Equal(today) {
+				selected, reason = loan.SourceTodaySnapshot, "fincloud_native_today"
+			}
+			logDecision(ctx, contract, "", selected, reason)
+			return loan.ResolvedPosition{Loan: contract, Position: position}, err
+		}
+	}
 	alternate := strings.TrimSpace(contract.AlternateAccount)
 	if alternate == "" {
 		return loan.ResolvedPosition{}, fmt.Errorf("%w: resolved alternate MSO account is empty", loan.ErrHistoricalEvidence)
