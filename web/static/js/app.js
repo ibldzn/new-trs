@@ -7184,6 +7184,58 @@ ${expression ? 'Expression: "' + expression + '"\n\n' : ""}`, el);
     ["path", { d: "m9 11 3 3L22 4" }]
   ];
 
+  // node_modules/lucide/dist/esm/icons/database-zap.mjs
+  var DatabaseZap = [
+    ["ellipse", { cx: "12", cy: "5", rx: "9", ry: "3" }],
+    ["path", { d: "M3 5V19A9 3 0 0 0 15 21.84" }],
+    ["path", { d: "M21 5V8" }],
+    ["path", { d: "M21 12L18 17H22L19 22" }],
+    ["path", { d: "M3 12A9 3 0 0 0 14.59 14.87" }]
+  ];
+
+  // node_modules/lucide/dist/esm/icons/file-archive.mjs
+  var FileArchive = [
+    [
+      "path",
+      {
+        d: "M13.659 22H18a2 2 0 0 0 2-2V8a2.4 2.4 0 0 0-.706-1.706l-3.588-3.588A2.4 2.4 0 0 0 14 2H6a2 2 0 0 0-2 2v11.5"
+      }
+    ],
+    ["path", { d: "M14 2v5a1 1 0 0 0 1 1h5" }],
+    ["path", { d: "M8 12v-1" }],
+    ["path", { d: "M8 18v-2" }],
+    ["path", { d: "M8 7V6" }],
+    ["circle", { cx: "8", cy: "20", r: "2" }]
+  ];
+
+  // node_modules/lucide/dist/esm/icons/file-spreadsheet.mjs
+  var FileSpreadsheet = [
+    [
+      "path",
+      {
+        d: "M6 22a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h8a2.4 2.4 0 0 1 1.704.706l3.588 3.588A2.4 2.4 0 0 1 20 8v12a2 2 0 0 1-2 2z"
+      }
+    ],
+    ["path", { d: "M14 2v5a1 1 0 0 0 1 1h5" }],
+    ["path", { d: "M8 13h2" }],
+    ["path", { d: "M14 13h2" }],
+    ["path", { d: "M8 17h2" }],
+    ["path", { d: "M14 17h2" }]
+  ];
+
+  // node_modules/lucide/dist/esm/icons/landmark.mjs
+  var Landmark = [
+    ["path", { d: "M10 18v-7" }],
+    [
+      "path",
+      { d: "M11.119 2.205a2 2 0 0 1 1.762 0l7.84 3.846A.5.5 0 0 1 20.5 7h-17a.5.5 0 0 1-.22-.949z" }
+    ],
+    ["path", { d: "M14 18v-7" }],
+    ["path", { d: "M18 18v-7" }],
+    ["path", { d: "M3 22h18" }],
+    ["path", { d: "M6 18v-7" }]
+  ];
+
   // node_modules/lucide/dist/esm/icons/layout-dashboard.mjs
   var LayoutDashboard = [
     ["rect", { width: "7", height: "9", x: "3", y: "3", rx: "1" }],
@@ -7251,6 +7303,18 @@ ${expression ? 'Expression: "' + expression + '"\n\n' : ""}`, el);
   var UserRound = [
     ["circle", { cx: "12", cy: "8", r: "5" }],
     ["path", { d: "M20 21a8 8 0 0 0-16 0" }]
+  ];
+
+  // node_modules/lucide/dist/esm/icons/user-shield.mjs
+  var UserShield = [
+    ["path", { d: "M10 15H6a4 4 0 0 0-4 4v2" }],
+    [
+      "path",
+      {
+        d: "M22 17.5c0 2.499-1.75 3.749-3.83 4.474a.5.5 0 0 1-.335-.005c-2.085-.72-3.835-1.97-3.835-4.47V14a.5.5 0 0 1 .5-.499c1 0 2.25-.6 3.12-1.36a.6.6 0 0 1 .76-.001c.875.765 2.12 1.36 3.12 1.36a.5.5 0 0 1 .5.5z"
+      }
+    ],
+    ["circle", { cx: "9", cy: "7", r: "4" }]
   ];
 
   // node_modules/lucide/dist/esm/icons/users.mjs
@@ -7438,7 +7502,25 @@ ${expression ? 'Expression: "' + expression + '"\n\n' : ""}`, el);
     window.dispatchEvent(new CustomEvent("confirm-submit", { detail: { form, trigger: event.submitter } }));
   });
   var initializeIcons = () => createIcons({
-    icons: { ChevronDown, CircleCheckBig, LayoutDashboard, LogOut, Menu, PanelLeftClose, ScrollText, Shield, ShieldCheck, UserRound, Users, X }
+    icons: {
+      ChevronDown,
+      CircleCheckBig,
+      DatabaseZap,
+      FileArchive,
+      FileSpreadsheet,
+      Landmark,
+      LayoutDashboard,
+      LogOut,
+      Menu,
+      PanelLeftClose,
+      ScrollText,
+      Shield,
+      ShieldCheck,
+      UserRound,
+      UserShield,
+      Users,
+      X
+    }
   });
   document.addEventListener("DOMContentLoaded", initializeIcons);
   document.body.addEventListener("htmx:afterSwap", initializeIcons);
@@ -7455,6 +7537,10 @@ lucide/dist/esm/shared/src/utils/toPascalCase.mjs:
 lucide/dist/esm/replaceElement.mjs:
 lucide/dist/esm/icons/chevron-down.mjs:
 lucide/dist/esm/icons/circle-check-big.mjs:
+lucide/dist/esm/icons/database-zap.mjs:
+lucide/dist/esm/icons/file-archive.mjs:
+lucide/dist/esm/icons/file-spreadsheet.mjs:
+lucide/dist/esm/icons/landmark.mjs:
 lucide/dist/esm/icons/layout-dashboard.mjs:
 lucide/dist/esm/icons/log-out.mjs:
 lucide/dist/esm/icons/menu.mjs:
@@ -7463,6 +7549,7 @@ lucide/dist/esm/icons/scroll-text.mjs:
 lucide/dist/esm/icons/shield-check.mjs:
 lucide/dist/esm/icons/shield.mjs:
 lucide/dist/esm/icons/user-round.mjs:
+lucide/dist/esm/icons/user-shield.mjs:
 lucide/dist/esm/icons/users.mjs:
 lucide/dist/esm/icons/x.mjs:
 lucide/dist/esm/lucide.mjs:

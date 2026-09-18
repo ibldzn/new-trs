@@ -3,17 +3,22 @@ import htmx from "htmx.org";
 import {
   ChevronDown,
   CircleCheckBig,
-  createIcons,
+  DatabaseZap,
+  FileArchive,
+  FileSpreadsheet,
+  Landmark,
   LayoutDashboard,
   LogOut,
   Menu,
   PanelLeftClose,
   ScrollText,
-  ShieldCheck,
   Shield,
-  Users,
+  ShieldCheck,
   UserRound,
+  UserShield,
+  Users,
   X,
+  createIcons,
 } from "lucide";
 
 window.Alpine = Alpine;
@@ -42,7 +47,7 @@ Alpine.store("theme", {
     this.preference = preference;
     try {
       localStorage.setItem("theme", preference);
-    } catch {}
+    } catch { }
     applyTheme(preference);
   },
 });
@@ -62,7 +67,7 @@ Alpine.data("adminShell", () => ({
     root.dataset.sidebarCollapsed = String(this.sidebarCollapsed);
     try {
       localStorage.setItem("sidebar-collapsed", String(this.sidebarCollapsed));
-    } catch {}
+    } catch { }
   },
   expandSidebar() {
     if (!this.sidebarCollapsed) return;
@@ -70,7 +75,7 @@ Alpine.data("adminShell", () => ({
     root.dataset.sidebarCollapsed = "false";
     try {
       localStorage.setItem("sidebar-collapsed", "false");
-    } catch {}
+    } catch { }
   },
   closeMobile() {
     this.mobileOpen = false;
@@ -103,7 +108,7 @@ Alpine.data("navigationDisclosure", () => ({
     sidebarDisclosures[this.key] = this.manualOpen;
     try {
       localStorage.setItem("sidebar-disclosures", JSON.stringify(sidebarDisclosures));
-    } catch {}
+    } catch { }
   },
 }));
 
@@ -148,7 +153,25 @@ document.addEventListener("submit", (event) => {
 
 const initializeIcons = () =>
   createIcons({
-    icons: { ChevronDown, CircleCheckBig, LayoutDashboard, LogOut, Menu, PanelLeftClose, ScrollText, Shield, ShieldCheck, UserRound, Users, X },
+    icons: {
+      ChevronDown,
+      CircleCheckBig,
+      DatabaseZap,
+      FileArchive,
+      FileSpreadsheet,
+      Landmark,
+      LayoutDashboard,
+      LogOut,
+      Menu,
+      PanelLeftClose,
+      ScrollText,
+      Shield,
+      ShieldCheck,
+      UserRound,
+      UserShield,
+      Users,
+      X
+    },
   });
 
 document.addEventListener("DOMContentLoaded", initializeIcons);
