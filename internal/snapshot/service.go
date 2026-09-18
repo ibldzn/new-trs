@@ -85,7 +85,7 @@ func validateRows(rows []loan.LoanPosition, date loan.Date) error {
 	seen := make(map[string]struct{}, len(rows))
 	for _, row := range rows {
 		account := strings.TrimSpace(row.AccountNumber)
-		if account == "" || !row.AsOf.Equal(date) || row.PrincipalOutstanding.IsNegative() || row.PrincipalDue.IsNegative() || row.InterestDue.IsNegative() || row.PrincipalDue.Cmp(row.PrincipalOutstanding) > 0 || row.CollectabilityBI < 1 || row.CollectabilityBI > 5 {
+		if account == "" || !row.AsOf.Equal(date) || row.LoanStartDate.IsZero() || row.LoanStartDate.After(date) || row.PrincipalOutstanding.IsNegative() || row.PrincipalDue.IsNegative() || row.InterestDue.IsNegative() || row.PrincipalDue.Cmp(row.PrincipalOutstanding) > 0 || row.CollectabilityBI < 1 || row.CollectabilityBI > 5 {
 			return fmt.Errorf("invalid snapshot row for account %q", account)
 		}
 		if _, duplicate := seen[account]; duplicate {

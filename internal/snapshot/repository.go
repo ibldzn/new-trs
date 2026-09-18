@@ -27,13 +27,14 @@ func NewRepository(database *sqlx.DB, location *time.Location) *Repository {
 
 func (repository *Repository) ExactPosition(ctx context.Context, account string, asOf loan.Date) (loan.LoanPosition, error) {
 	const query = `
-		SELECT account_number, as_of_date, principal_outstanding, collectability_bi,
+		SELECT account_number, as_of_date, loan_start_date, principal_outstanding, collectability_bi,
 		       principal_arrears, interest_arrears, branch, product, cif, contract_number, source_updated_at
 		FROM current_loan_position_snapshot
 		WHERE account_number = ? AND as_of_date = ?`
 	var row struct {
 		AccountNumber        string         `db:"account_number"`
 		AsOf                 time.Time      `db:"as_of_date"`
+		LoanStartDate        sql.NullTime   `db:"loan_start_date"`
 		PrincipalOutstanding loan.Money     `db:"principal_outstanding"`
 		CollectabilityBI     int            `db:"collectability_bi"`
 		PrincipalDue         loan.Money     `db:"principal_arrears"`
@@ -53,8 +54,15 @@ func (repository *Repository) ExactPosition(ctx context.Context, account string,
 	if row.CollectabilityBI < 1 || row.CollectabilityBI > 5 || row.PrincipalOutstanding.IsNegative() || row.PrincipalDue.IsNegative() || row.InterestDue.IsNegative() || row.PrincipalDue.Cmp(row.PrincipalOutstanding) > 0 {
 		return loan.LoanPosition{}, fmt.Errorf("%w: invalid stored position", loan.ErrCurrentSnapshot)
 	}
+	if !row.LoanStartDate.Valid || row.LoanStartDate.Time.IsZero() {
+		return loan.LoanPosition{}, errors.Join(loan.ErrCurrentSnapshot, loan.ErrHistoricalEvidence, fmt.Errorf("snapshot loan start date is missing"))
+	}
+	loanStartDate, err := loan.ParseDate(row.LoanStartDate.Time.Format(loan.DateLayout), repository.location)
+	if err != nil || loanStartDate.After(asOf) {
+		return loan.LoanPosition{}, errors.Join(loan.ErrCurrentSnapshot, loan.ErrHistoricalEvidence, fmt.Errorf("invalid snapshot loan start date"))
+	}
 	position := loan.LoanPosition{
-		AsOf: loan.NewDate(row.AsOf, repository.location), AccountNumber: row.AccountNumber,
+		AsOf: loan.NewDate(row.AsOf, repository.location), LoanStartDate: loanStartDate, AccountNumber: row.AccountNumber,
 		PrincipalOutstanding: row.PrincipalOutstanding, PrincipalDue: row.PrincipalDue, InterestDue: row.InterestDue,
 		CollectabilityBI: row.CollectabilityBI, Source: loan.SourceTodaySnapshot,
 		Branch: row.Branch.String, Product: row.Product.String, CIF: row.CIF.String, ContractNumber: row.ContractNumber.String,
@@ -92,12 +100,15 @@ func (repository *Repository) ReplaceAll(ctx context.Context, rows []loan.LoanPo
 }
 
 func insertRows(ctx context.Context, transaction *sqlx.Tx, rows []loan.LoanPosition, refreshedAt time.Time) error {
-	const columns = `(account_number, as_of_date, principal_outstanding, collectability_bi, principal_arrears, interest_arrears, branch, product, cif, contract_number, source_updated_at, refreshed_at)`
+	const columns = `(account_number, as_of_date, loan_start_date, principal_outstanding, collectability_bi, principal_arrears, interest_arrears, branch, product, cif, contract_number, source_updated_at, refreshed_at)`
 	values := make([]string, 0, len(rows))
-	arguments := make([]any, 0, len(rows)*12)
+	arguments := make([]any, 0, len(rows)*13)
 	for _, row := range rows {
-		values = append(values, `(?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?)`)
-		arguments = append(arguments, row.AccountNumber, row.AsOf.String(), row.PrincipalOutstanding, row.CollectabilityBI,
+		if row.LoanStartDate.IsZero() || row.LoanStartDate.After(row.AsOf) {
+			return fmt.Errorf("%w: invalid snapshot loan start date", loan.ErrHistoricalEvidence)
+		}
+		values = append(values, `(?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?)`)
+		arguments = append(arguments, row.AccountNumber, row.AsOf.String(), row.LoanStartDate.String(), row.PrincipalOutstanding, row.CollectabilityBI,
 			row.PrincipalDue, row.InterestDue, row.Branch, row.Product, row.CIF, row.ContractNumber, row.SourceUpdatedAt, refreshedAt)
 	}
 	query := `INSERT INTO current_loan_position_snapshot ` + columns + ` VALUES ` + strings.Join(values, ",")

@@ -79,10 +79,11 @@ Production binary: `bin/trs`.
 ## Data rules
 
 - Closed-as-of loans have zero balance before source routing.
-- Loans disbursed by `2025-10-12` retain MSO historical/opening rules; later eligible flat positions reconstruct from the MSO opening, Fincloud schedule dates/repayments, and historical collectability.
-- Loans disbursed after `2025-10-12` use exact DWH positions for historical dates and the local snapshot for today, without MSO. A reporting date before disbursement is unsupported.
-- Post-cutoff routing requires Fincloud disbursement-date evidence. Historical exact positions use DWH; today uses the local snapshot.
+- For post-cutoff dates, original loan start `periode_mulai` from the exact DWH position (or today's report `start_date`) determines lineage: `<= 2025-10-12` is migrated; `> 2025-10-12` is Fincloud-native. Fincloud `tgl_pencairan` is not lineage evidence.
+- Migrated loans retain MSO historical/opening rules; later eligible flat positions reconstruct from the MSO opening, Fincloud schedule dates/repayments, and historical collectability.
+- Fincloud-native loans use exact DWH positions for historical dates and the local snapshot for today, without MSO. Missing or inconsistent loan-start evidence is an error.
 - Missing evidence returns an error. No current Fincloud balance fallback exists.
+- Apply migrations with `make migrate`, then refresh today's snapshot to populate `loan_start_date`; older nullable rows cannot establish lineage.
 
 ## Unresolved production validation
 

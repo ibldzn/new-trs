@@ -128,13 +128,13 @@ func TestPositionServiceFutureOrAbsentCloseUsesHistoricalCalculation(t *testing.
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			contract := loan.ContractData{PrimaryAccount: "primary", AlternateAccount: "0130112345", FlatRatePercent: loan.MustMoney("18"),
-				PlafondLimit: loan.MustMoney("100"), TenorMonths: 1, DisbursementDate: parseDate("2024-01-01", location),
+				PlafondLimit: loan.MustMoney("100"), TenorMonths: 1,
 				ContractSchedule: []loan.ContractualInstallment{{Number: 1, DueDate: parseDate("2025-11-12", location)}}}
 			if test.closeDate != "" {
 				contract.CloseDate = parseDate(test.closeDate, location)
 			}
 			mso := &msoFake{opening: loan.OpeningLoanState{InterestType: FlatInterestType, PrincipalOutstanding: loan.MustMoney("100"), CollectabilityBI: 1}}
-			dwh, snapshot := &dwhFake{}, &snapshotFake{}
+			dwh, snapshot := &dwhFake{exact: loan.LoanPosition{LoanStartDate: parseDate("2024-06-01", location)}}, &snapshotFake{}
 			calculator := &calculatorFake{result: loan.CalculationResult{PrincipalOutstanding: loan.MustMoney("55"), CollectabilityBI: 1}}
 			service, _ := NewService(&fincloudFake{contract: contract}, mso, dwh, snapshot, calculator, location)
 			service.now = func() time.Time { return parseDate("2026-09-14", location).Time(location) }
@@ -233,34 +233,35 @@ func TestPositionServiceSelectsAuthoritativeSource(t *testing.T) {
 	for _, test := range []struct {
 		name                                                                                        string
 		asOf                                                                                        string
-		disbursementDate                                                                            string
+		loanStartDate                                                                               string
 		interestType                                                                                string
 		unusableSchedule                                                                            bool
 		wantSource                                                                                  loan.PositionSource
 		wantMSOHistorical, wantMSOOpening, wantDWHExact, wantTimeline, wantSnapshot, wantCalculator int
 	}{
 		{name: "pre-cutoff uses MSO", asOf: "2025-10-11", interestType: "10", wantSource: loan.SourceMSO, wantMSOHistorical: 1},
-		{name: "cutoff disbursement uses MSO opening", asOf: "2025-10-12", disbursementDate: "2025-10-12", interestType: "10", wantSource: loan.SourceMSO, wantMSOOpening: 1},
+		{name: "cutoff uses MSO opening without exact evidence", asOf: "2025-10-12", interestType: "10", wantSource: loan.SourceMSO, wantMSOOpening: 1},
+		{name: "start exactly on cutoff stays migrated", asOf: "2026-09-13", loanStartDate: "2025-10-12", interestType: "20", wantSource: loan.SourceDWH, wantMSOOpening: 1, wantDWHExact: 1},
 		{name: "non-contractual historical ignores unusable flat schedule", asOf: "2026-09-13", interestType: "20", unusableSchedule: true, wantSource: loan.SourceDWH, wantMSOOpening: 1, wantDWHExact: 1},
 		{name: "non-contractual today uses current snapshot", asOf: "2026-09-14", interestType: "20", wantSource: loan.SourceTodaySnapshot, wantMSOOpening: 1, wantSnapshot: 1},
-		{name: "reconstructed post-cutoff loan", asOf: "2026-09-13", interestType: "10", wantSource: loan.SourceReconstructed, wantMSOOpening: 1, wantTimeline: 1, wantCalculator: 1},
+		{name: "reconstructed post-cutoff loan", asOf: "2026-09-13", interestType: "10", wantSource: loan.SourceReconstructed, wantMSOOpening: 1, wantDWHExact: 1, wantTimeline: 1, wantCalculator: 1},
 		{name: "supported today requires snapshot collectability", asOf: "2026-09-14", interestType: "10", wantSource: loan.SourceReconstructed, wantMSOOpening: 1, wantTimeline: 1, wantSnapshot: 1, wantCalculator: 1},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			asOf := parseDate(test.asOf, location)
-			disbursementDate := test.disbursementDate
-			if disbursementDate == "" {
-				disbursementDate = "2024-01-01"
+			loanStartDate := test.loanStartDate
+			if loanStartDate == "" {
+				loanStartDate = "2024-06-01"
 			}
-			contract := loan.ContractData{PrimaryAccount: "3080020000000094", AlternateAccount: "0130112345", DisbursementDate: parseDate(disbursementDate, location), PlafondLimit: loan.MustMoney("100"), TenorMonths: 1, FlatRatePercent: loan.MustMoney("12"), ContractSchedule: []loan.ContractualInstallment{{Number: 1, DueDate: parseDate("2025-11-12", location)}}}
+			contract := loan.ContractData{PrimaryAccount: "3080020000000094", AlternateAccount: "0130112345", PlafondLimit: loan.MustMoney("100"), TenorMonths: 1, FlatRatePercent: loan.MustMoney("12"), ContractSchedule: []loan.ContractualInstallment{{Number: 1, DueDate: parseDate("2025-11-12", location)}}}
 			if test.unusableSchedule {
 				contract.ContractSchedule = nil
 				contract.ContractScheduleEvidence = []loan.ContractualInstallmentEvidence{{Number: 1, RawDueDate: "bad"}}
 			}
 			fincloud := &fincloudFake{contract: contract}
 			mso := &msoFake{historical: loan.LoanPosition{AccountNumber: "01.301.12345", Source: loan.SourceMSO}, opening: loan.OpeningLoanState{AccountNumber: "01.301.12345", InterestType: test.interestType, PrincipalOutstanding: loan.MustMoney("100"), CollectabilityBI: 2}}
-			dwh := &dwhFake{exact: loan.LoanPosition{Source: loan.SourceDWH}, timeline: []loan.CollectabilityPoint{{Date: parseDate("2026-09-13", location), Value: 3}}}
-			snapshot := &snapshotFake{position: loan.LoanPosition{Source: loan.SourceTodaySnapshot, CollectabilityBI: 4}}
+			dwh := &dwhFake{exact: loan.LoanPosition{LoanStartDate: parseDate(loanStartDate, location), Source: loan.SourceDWH}, timeline: []loan.CollectabilityPoint{{Date: parseDate("2026-09-13", location), Value: 3}}}
+			snapshot := &snapshotFake{position: loan.LoanPosition{LoanStartDate: parseDate(loanStartDate, location), Source: loan.SourceTodaySnapshot, CollectabilityBI: 4}}
 			calculator := &calculatorFake{result: loan.CalculationResult{AsOf: asOf, PrincipalOutstanding: loan.MustMoney("55"), CollectabilityBI: 4}}
 			service, err := NewService(fincloud, mso, dwh, snapshot, calculator, location)
 			if err != nil {
@@ -296,6 +297,9 @@ func TestPositionServiceSelectsAuthoritativeSource(t *testing.T) {
 				if calculator.input.Opening.CollectabilityBI != 2 || len(calculator.input.CollectabilityTimeline) != test.wantTimeline+test.wantSnapshot || calculator.input.ContractualPrincipal.Format(2) != "100.00" {
 					t.Fatalf("calculator input = %+v", calculator.input)
 				}
+				if asOf.Equal(today) && calculator.input.CollectabilityTimeline[len(calculator.input.CollectabilityTimeline)-1].Value != 4 {
+					t.Fatalf("today collectability was not reused from snapshot: %+v", calculator.input.CollectabilityTimeline)
+				}
 			}
 		})
 	}
@@ -304,21 +308,20 @@ func TestPositionServiceSelectsAuthoritativeSource(t *testing.T) {
 func TestPositionServiceFincloudNativeRoutesWithoutMSO(t *testing.T) {
 	location := time.FixedZone("Jakarta", 7*60*60)
 	for _, test := range []struct {
-		name, disbursementDate, closeDate, asOf string
-		wantSource                              loan.PositionSource
-		wantDWH, wantSnapshot                   int
-		wantError                               error
+		name, loanStartDate, closeDate, asOf string
+		wantSource                           loan.PositionSource
+		wantDWH, wantSnapshot                int
+		wantError                            error
 	}{
-		{name: "historical without alternate", disbursementDate: "2026-01-15", asOf: "2026-08-31", wantSource: loan.SourceDWH, wantDWH: 1},
-		{name: "today without alternate", disbursementDate: "2026-01-15", asOf: "2026-09-14", wantSource: loan.SourceTodaySnapshot, wantSnapshot: 1},
-		{name: "day after cutoff", disbursementDate: "2025-10-13", asOf: "2025-10-13", wantSource: loan.SourceDWH, wantDWH: 1},
-		{name: "closed native loan", disbursementDate: "2026-01-15", closeDate: "2026-08-20", asOf: "2026-08-31", wantSource: loan.SourceClosed},
-		{name: "before native disbursement", disbursementDate: "2026-01-15", asOf: "2025-10-11", wantError: loan.ErrHistoricalEvidence},
-		{name: "after cutoff but before disbursement", disbursementDate: "2026-01-15", asOf: "2025-12-31", wantError: loan.ErrHistoricalEvidence},
+		{name: "historical without alternate", loanStartDate: "2026-01-15", asOf: "2026-08-31", wantSource: loan.SourceDWH, wantDWH: 1},
+		{name: "today without alternate", loanStartDate: "2026-01-15", asOf: "2026-09-14", wantSource: loan.SourceTodaySnapshot, wantSnapshot: 1},
+		{name: "day after cutoff", loanStartDate: "2025-10-13", asOf: "2025-10-13", wantSource: loan.SourceDWH, wantDWH: 1},
+		{name: "closed native loan", loanStartDate: "2026-01-15", closeDate: "2026-08-20", asOf: "2026-08-31", wantSource: loan.SourceClosed},
+		{name: "start date after as-of", loanStartDate: "2026-01-15", asOf: "2025-12-31", wantError: loan.ErrHistoricalEvidence, wantDWH: 1},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			contract := loan.ContractData{
-				PrimaryAccount: "primary", DisbursementDate: parseDate(test.disbursementDate, location),
+				PrimaryAccount:  "primary",
 				FlatRatePercent: loan.MustMoney("12.50"),
 			}
 			if test.closeDate != "" {
@@ -327,7 +330,7 @@ func TestPositionServiceFincloudNativeRoutesWithoutMSO(t *testing.T) {
 			fincloud := &fincloudFake{contract: contract}
 			mso := &msoFake{}
 			position := loan.LoanPosition{
-				AsOf: parseDate(test.asOf, location), AccountNumber: "primary",
+				AsOf: parseDate(test.asOf, location), LoanStartDate: parseDate(test.loanStartDate, location), AccountNumber: "primary",
 				PrincipalOutstanding: loan.MustMoney("76543210"), PrincipalDue: loan.MustMoney("100000"),
 				InterestDue: loan.MustMoney("20000"), CollectabilityBI: 2, Source: test.wantSource,
 			}
@@ -374,18 +377,22 @@ func TestPositionServiceRequiresPositiveLineageEvidence(t *testing.T) {
 	for _, test := range []struct {
 		name             string
 		contract         loan.ContractData
+		missingStart     bool
 		msoError         error
 		dwhError         error
 		wantError        error
 		wantMSO, wantDWH int
 	}{
-		{name: "missing disbursement", contract: loan.ContractData{PrimaryAccount: "primary", AlternateAccount: "alternate"}, wantError: loan.ErrHistoricalEvidence},
-		{name: "migrated missing MSO opening", contract: loan.ContractData{PrimaryAccount: "primary", AlternateAccount: "alternate", DisbursementDate: parseDate("2024-01-01", location)}, msoError: loan.ErrHistoricalEvidence, wantError: loan.ErrHistoricalEvidence, wantMSO: 1},
-		{name: "native missing DWH exact row", contract: loan.ContractData{PrimaryAccount: "primary", DisbursementDate: parseDate("2026-01-15", location)}, dwhError: errors.Join(loan.ErrNotFound, loan.ErrHistoricalEvidence), wantError: loan.ErrHistoricalEvidence, wantDWH: 1},
+		{name: "missing original start", contract: loan.ContractData{PrimaryAccount: "primary", AlternateAccount: "alternate"}, missingStart: true, wantError: loan.ErrHistoricalEvidence, wantDWH: 1},
+		{name: "migrated missing MSO opening", contract: loan.ContractData{PrimaryAccount: "primary", AlternateAccount: "alternate"}, msoError: loan.ErrHistoricalEvidence, wantError: loan.ErrHistoricalEvidence, wantMSO: 1, wantDWH: 1},
+		{name: "native missing DWH exact row", contract: loan.ContractData{PrimaryAccount: "primary"}, dwhError: errors.Join(loan.ErrNotFound, loan.ErrHistoricalEvidence), wantError: loan.ErrHistoricalEvidence, wantDWH: 1},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			mso := &msoFake{openingError: test.msoError}
-			dwh := &dwhFake{exactError: test.dwhError}
+			dwh := &dwhFake{exact: loan.LoanPosition{LoanStartDate: parseDate("2024-06-01", location)}, exactError: test.dwhError}
+			if test.missingStart {
+				dwh.exact.LoanStartDate = loan.Date{}
+			}
 			snapshot, calculator := &snapshotFake{}, &calculatorFake{}
 			service, _ := NewService(&fincloudFake{contract: test.contract}, mso, dwh, snapshot, calculator, location)
 			service.now = func() time.Time { return parseDate("2026-09-14", location).Time(location) }
@@ -405,7 +412,7 @@ func TestPositionServiceReconstructsFlatLoanWithPreCutoffRestructuringMetadata(t
 		case "/admin/access/login":
 			_, _ = writer.Write([]byte(`{"status":"ok","data":{"result":{"sessionid":"session"}}}`))
 		case "/pinjaman/inquiry/rekening/pinjaman":
-			_, _ = writer.Write([]byte(`{"status":"ok","data":{"result":{"id":"primary","noalt":"0130112345","tgl_pencairan":"2024-01-01","plafondlimit":"100","jangkawaktu":"1 bulan","bungaflat":"12","restruktur_tanggalakhirakad":{"date":"2023-10-30 00:00:00.000000","timezone_type":3,"timezone":"Asia/Jakarta"},"jadwalangsuran":[{"angsuranke":1,"tanggal":"2025-11-12"}]}}}`))
+			_, _ = writer.Write([]byte(`{"status":"ok","data":{"result":{"id":"primary","noalt":"0130112345","tgl_pencairan":"2025-10-13","plafondlimit":"100","jangkawaktu":"1 bulan","bungaflat":"12","restruktur_tanggalakhirakad":{"date":"2026-02-15 00:00:00.000000","timezone_type":3,"timezone":"Asia/Jakarta"},"jadwalangsuran":[{"angsuranke":1,"tanggal":"2025-11-12"}]}}}`))
 		case "/admin/access/logout":
 			writer.WriteHeader(http.StatusNoContent)
 		default:
@@ -421,7 +428,7 @@ func TestPositionServiceReconstructsFlatLoanWithPreCutoffRestructuringMetadata(t
 
 	location := time.FixedZone("Jakarta", 7*60*60)
 	mso := &msoFake{opening: loan.OpeningLoanState{InterestType: FlatInterestType, PrincipalOutstanding: loan.MustMoney("100"), CollectabilityBI: 1}}
-	dwh := &dwhFake{}
+	dwh := &dwhFake{exact: loan.LoanPosition{LoanStartDate: parseDate("2024-06-01", location)}}
 	snapshot := &snapshotFake{}
 	calculator := &calculatorFake{result: loan.CalculationResult{PrincipalOutstanding: loan.MustMoney("75"), CollectabilityBI: 1}}
 	service, _ := NewService(client, mso, dwh, snapshot, calculator, location)
@@ -431,7 +438,7 @@ func TestPositionServiceReconstructsFlatLoanWithPreCutoffRestructuringMetadata(t
 	if err != nil {
 		t.Fatal(err)
 	}
-	if result.Position.Source != loan.SourceReconstructed || calculator.calls != 1 || dwh.exactCalls != 0 || dwh.timelineCalls != 1 || snapshot.calls != 0 {
+	if result.Position.Source != loan.SourceReconstructed || result.Position.LoanStartDate.String() != "2024-06-01" || mso.openingCalls != 1 || calculator.calls != 1 || dwh.exactCalls != 1 || dwh.timelineCalls != 1 || snapshot.calls != 0 {
 		t.Fatalf("source=%s calculator=%d exact=%d timeline=%d snapshot=%d", result.Position.Source, calculator.calls, dwh.exactCalls, dwh.timelineCalls, snapshot.calls)
 	}
 }
@@ -456,11 +463,11 @@ func TestPositionServiceReconstructsNormalizedTenorPlusOneSchedule(t *testing.T)
 	}
 	contract := loan.ContractData{
 		PrimaryAccount: "primary", AlternateAccount: "alternate", PlafondLimit: loan.MustMoney("100000000"), TenorMonths: 60,
-		FlatRatePercent: loan.MustMoney("7.8"), DisbursementDate: parseDate("2024-01-01", location), RawScheduleCount: 61, ContractScheduleEvidence: evidence,
+		FlatRatePercent: loan.MustMoney("7.8"), RawScheduleCount: 61, ContractScheduleEvidence: evidence,
 	}
 	mso := &msoFake{opening: loan.OpeningLoanState{InterestType: FlatInterestType, PrincipalOutstanding: loan.MustMoney("100"), CollectabilityBI: 1}}
 	dwh := &dwhFake{}
-	snapshot := &snapshotFake{position: loan.LoanPosition{Source: loan.SourceTodaySnapshot, CollectabilityBI: 2}}
+	snapshot := &snapshotFake{position: loan.LoanPosition{LoanStartDate: parseDate("2024-06-01", location), Source: loan.SourceTodaySnapshot, CollectabilityBI: 2}}
 	calculator := &calculatorFake{result: loan.CalculationResult{PrincipalOutstanding: loan.MustMoney("50"), CollectabilityBI: 1}}
 	service, _ := NewService(&fincloudFake{contract: contract}, mso, dwh, snapshot, calculator, location)
 	service.now = func() time.Time { return parseDate("2026-09-14", location).Time(location) }
@@ -479,26 +486,26 @@ func TestPositionServiceReconstructsNormalizedTenorPlusOneSchedule(t *testing.T)
 
 func TestPositionServiceRejectsInvalidFlatContractSchedule(t *testing.T) {
 	location := time.FixedZone("Jakarta", 7*60*60)
-	contract := loan.ContractData{PrimaryAccount: "primary", AlternateAccount: "alternate", DisbursementDate: parseDate("2024-01-01", location), PlafondLimit: loan.MustMoney("100"), TenorMonths: 2, FlatRatePercent: loan.MustMoney("12"), ContractScheduleEvidence: []loan.ContractualInstallmentEvidence{{Number: 1, RawDueDate: "bad"}}}
+	contract := loan.ContractData{PrimaryAccount: "primary", AlternateAccount: "alternate", PlafondLimit: loan.MustMoney("100"), TenorMonths: 2, FlatRatePercent: loan.MustMoney("12"), ContractScheduleEvidence: []loan.ContractualInstallmentEvidence{{Number: 1, RawDueDate: "bad"}}}
 	mso := &msoFake{opening: loan.OpeningLoanState{InterestType: FlatInterestType, PrincipalOutstanding: loan.MustMoney("100"), CollectabilityBI: 1}}
-	dwh := &dwhFake{}
+	dwh := &dwhFake{exact: loan.LoanPosition{LoanStartDate: parseDate("2024-06-01", location)}}
 	snapshot := &snapshotFake{}
 	calculator := &calculatorFake{}
 	service, _ := NewService(&fincloudFake{contract: contract}, mso, dwh, snapshot, calculator, location)
 	service.now = func() time.Time { return parseDate("2026-09-14", location).Time(location) }
 
 	_, err := service.GetLoanPosition(context.Background(), "primary", parseDate("2026-09-13", location))
-	if !errors.Is(err, loan.ErrUnsupportedCalculation) || dwh.exactCalls != 0 || dwh.timelineCalls != 0 || snapshot.calls != 0 || calculator.calls != 0 {
+	if !errors.Is(err, loan.ErrUnsupportedCalculation) || dwh.exactCalls != 1 || dwh.timelineCalls != 0 || snapshot.calls != 0 || calculator.calls != 0 {
 		t.Fatalf("error=%v exact=%d timeline=%d snapshot=%d calculator=%d", err, dwh.exactCalls, dwh.timelineCalls, snapshot.calls, calculator.calls)
 	}
 }
 
 func TestPositionServiceNeverFallsBackFromMissingEvidence(t *testing.T) {
 	location := time.FixedZone("Jakarta", 7*60*60)
-	contract := loan.ContractData{PrimaryAccount: "primary", AlternateAccount: "alternate", DisbursementDate: parseDate("2024-01-01", location), PlafondLimit: loan.MustMoney("100"), TenorMonths: 1, FlatRatePercent: loan.MustMoney("12"), ContractSchedule: []loan.ContractualInstallment{{Number: 1, DueDate: parseDate("2025-11-12", location)}}}
+	contract := loan.ContractData{PrimaryAccount: "primary", AlternateAccount: "alternate", PlafondLimit: loan.MustMoney("100"), TenorMonths: 1, FlatRatePercent: loan.MustMoney("12"), ContractSchedule: []loan.ContractualInstallment{{Number: 1, DueDate: parseDate("2025-11-12", location)}}}
 	mso := &msoFake{opening: loan.OpeningLoanState{AccountNumber: "primary", InterestType: "10", PrincipalOutstanding: loan.MustMoney("100"), CollectabilityBI: 1}}
-	dwh := &dwhFake{timelineError: loan.ErrDWHUnavailable}
-	snapshot := &snapshotFake{position: loan.LoanPosition{PrincipalOutstanding: loan.MustMoney("999"), CollectabilityBI: 1}}
+	dwh := &dwhFake{exact: loan.LoanPosition{LoanStartDate: parseDate("2024-06-01", location)}, timelineError: loan.ErrDWHUnavailable}
+	snapshot := &snapshotFake{position: loan.LoanPosition{LoanStartDate: parseDate("2024-06-01", location), PrincipalOutstanding: loan.MustMoney("999"), CollectabilityBI: 1}}
 	service, _ := NewService(&fincloudFake{contract: contract}, mso, dwh, snapshot, &calculatorFake{}, location)
 	service.now = func() time.Time { return parseDate("2026-09-14", location).Time(location) }
 	_, err := service.GetLoanPosition(context.Background(), "account", parseDate("2026-09-13", location))

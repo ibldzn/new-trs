@@ -19,8 +19,9 @@ func TestRepositoryReplacesSnapshotAndSerializesRefresh(t *testing.T) {
 	}
 	repository := NewRepository(database, time.UTC)
 	asOf, _ := loan.ParseDate("2026-09-14", time.UTC)
-	oldRow := loan.LoanPosition{AsOf: asOf, AccountNumber: "old", PrincipalOutstanding: loan.MustMoney("10"), CollectabilityBI: 1}
-	newRow := loan.LoanPosition{AsOf: asOf, AccountNumber: "new", PrincipalOutstanding: loan.MustMoney("20"), CollectabilityBI: 2}
+	start, _ := loan.ParseDate("2024-06-01", time.UTC)
+	oldRow := loan.LoanPosition{AsOf: asOf, LoanStartDate: start, AccountNumber: "old", PrincipalOutstanding: loan.MustMoney("10"), CollectabilityBI: 1}
+	newRow := loan.LoanPosition{AsOf: asOf, LoanStartDate: start, AccountNumber: "new", PrincipalOutstanding: loan.MustMoney("20"), PrincipalDue: loan.MustMoney("2"), InterestDue: loan.MustMoney("1"), CollectabilityBI: 2, Branch: "001", Product: "P1", CIF: "C1", ContractNumber: "K1"}
 	if err := repository.ReplaceAll(context.Background(), []loan.LoanPosition{oldRow}, time.Now()); err != nil {
 		t.Fatal(err)
 	}
@@ -31,8 +32,22 @@ func TestRepositoryReplacesSnapshotAndSerializesRefresh(t *testing.T) {
 		t.Fatalf("stale row error = %v", err)
 	}
 	position, err := repository.ExactPosition(context.Background(), "new", asOf)
-	if err != nil || position.PrincipalOutstanding.Format(2) != "20.00" || position.CollectabilityBI != 2 {
+	if err != nil || position.LoanStartDate.String() != "2024-06-01" || position.PrincipalOutstanding.Format(2) != "20.00" || position.PrincipalDue.Format(2) != "2.00" || position.InterestDue.Format(2) != "1.00" || position.CollectabilityBI != 2 || position.Branch != "001" || position.Product != "P1" || position.CIF != "C1" || position.ContractNumber != "K1" {
 		t.Fatalf("position=%+v error=%v", position, err)
+	}
+	invalid := newRow
+	invalid.LoanStartDate = loan.Date{}
+	if err := repository.ReplaceAll(context.Background(), []loan.LoanPosition{invalid}, time.Now()); !errors.Is(err, loan.ErrHistoricalEvidence) {
+		t.Fatalf("invalid replacement error=%v", err)
+	}
+	if _, err := repository.ExactPosition(context.Background(), "new", asOf); err != nil {
+		t.Fatalf("invalid replacement removed prior snapshot: %v", err)
+	}
+	if _, err := database.Exec(`UPDATE current_loan_position_snapshot SET loan_start_date = NULL WHERE account_number = 'new'`); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.ExactPosition(context.Background(), "new", asOf); !errors.Is(err, loan.ErrHistoricalEvidence) {
+		t.Fatalf("old nullable row error=%v", err)
 	}
 	status, err := repository.Status(context.Background())
 	if err != nil || status.LastStatus != "succeeded" || status.LastRowCount != 1 {

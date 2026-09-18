@@ -61,34 +61,14 @@ func TestMapLoanCloseDateForms(t *testing.T) {
 	}
 }
 
-func TestMapLoanDisbursementDateForms(t *testing.T) {
-	for _, test := range []struct {
-		name, field, wantDate, wantError string
-	}{
-		{"wrapped object", `,"tgl_pencairan":{"date":"2026-01-15 00:00:00.000000","timezone_type":3,"timezone":"Asia/Jakarta"}`, "2026-01-15", ""},
-		{"plain date", `,"tgl_pencairan":"2026-01-15"`, "2026-01-15", ""},
-		{"plain timestamp", `,"tgl_pencairan":"2026-01-15 23:59:59.000000"`, "2026-01-15", ""},
-		{"absent", "", "", ""},
-		{"null", `,"tgl_pencairan":null`, "", ""},
-		{"malformed date", `,"tgl_pencairan":{"date":"2026-02-30 00:00:00.000000"}`, "", "invalid tgl_pencairan"},
-	} {
-		t.Run(test.name, func(t *testing.T) {
-			var source loanDTO
-			raw := `{"id":"primary","plafondlimit":"100","jangkawaktu":"1 bulan","bungaflat":"12"` + test.field + `}`
-			if err := json.Unmarshal([]byte(raw), &source); err != nil {
-				t.Fatal(err)
-			}
-			contract, err := mapLoan(source, time.FixedZone("Jakarta", 7*60*60))
-			if test.wantError != "" {
-				if !errors.Is(err, loan.ErrFincloudUnavailable) || !strings.Contains(err.Error(), test.wantError) {
-					t.Fatalf("error=%v", err)
-				}
-				return
-			}
-			if err != nil || contract.DisbursementDate.String() != test.wantDate {
-				t.Fatalf("disbursement date=%s want=%s error=%v", contract.DisbursementDate, test.wantDate, err)
-			}
-		})
+func TestMapLoanIgnoresMisleadingFincloudDisbursementDate(t *testing.T) {
+	var source loanDTO
+	if err := json.Unmarshal([]byte(`{"id":"primary","plafondlimit":"100","jangkawaktu":"1 bulan","bungaflat":"12","tgl_pencairan":"2025-10-13"}`), &source); err != nil {
+		t.Fatal(err)
+	}
+	contract, err := mapLoan(source, time.FixedZone("Jakarta", 7*60*60))
+	if err != nil || contract.PrimaryAccount != "primary" {
+		t.Fatalf("contract=%+v error=%v", contract, err)
 	}
 }
 

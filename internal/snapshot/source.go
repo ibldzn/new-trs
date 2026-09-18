@@ -55,6 +55,13 @@ func (source *Source) parse(body []byte, businessDate loan.Date) ([]loan.LoanPos
 			return nil, fmt.Errorf("current snapshot report missing column %q", required)
 		}
 	}
+	startColumn := "start date" // Live Report Today header: start_date.
+	if _, ok := columns[startColumn]; !ok {
+		startColumn = "periode mulai" // Exact source alias after header canonicalization.
+		if _, ok := columns[startColumn]; !ok {
+			return nil, fmt.Errorf("current snapshot report missing loan start date column")
+		}
+	}
 	rows := make([]loan.LoanPosition, 0)
 	seen := make(map[string]loan.LoanPosition)
 	for line := 2; ; line++ {
@@ -75,6 +82,10 @@ func (source *Source) parse(body []byte, businessDate loan.Date) ([]loan.LoanPos
 		asOf, err := parseSourceDate(cell(record, columns, "date params"), source.location)
 		if err != nil || !asOf.Equal(businessDate) {
 			return nil, fmt.Errorf("current snapshot line %d has invalid business date", line)
+		}
+		loanStartDate, err := parseLoanStartDate(cell(record, columns, startColumn), source.location)
+		if err != nil || loanStartDate.After(asOf) {
+			return nil, fmt.Errorf("current snapshot line %d has invalid loan start date", line)
 		}
 		principal, err := parseSourceMoney(cell(record, columns, "loan outstanding"))
 		if err != nil {
@@ -101,7 +112,7 @@ func (source *Source) parse(body []byte, businessDate loan.Date) ([]loan.LoanPos
 			branch = before
 		}
 		row := loan.LoanPosition{
-			AsOf: asOf, AccountNumber: account, PrincipalOutstanding: principal, PrincipalDue: principalDue,
+			AsOf: asOf, LoanStartDate: loanStartDate, AccountNumber: account, PrincipalOutstanding: principal, PrincipalDue: principalDue,
 			InterestDue: interestDue, CollectabilityBI: collectability, Source: loan.SourceTodaySnapshot,
 			Branch: strings.TrimSpace(branch), Product: strings.TrimSpace(cell(record, columns, "product id")),
 			CIF: strings.TrimSpace(cell(record, columns, "cif no")), ContractNumber: strings.TrimSpace(cell(record, columns, "loan agreement no")),
@@ -161,8 +172,19 @@ func parseSourceDate(raw string, location *time.Location) (loan.Date, error) {
 	return loan.Date{}, fmt.Errorf("invalid date %q", raw)
 }
 
+func parseLoanStartDate(raw string, location *time.Location) (loan.Date, error) {
+	raw = strings.TrimSpace(raw)
+	for _, layout := range []string{loan.DateLayout, "02/01/2006"} {
+		value, err := time.ParseInLocation(layout, raw, location)
+		if err == nil && value.Format(layout) == raw {
+			return loan.NewDate(value, location), nil
+		}
+	}
+	return loan.Date{}, fmt.Errorf("invalid loan start date %q", raw)
+}
+
 func samePosition(left, right loan.LoanPosition) bool {
-	return left.AsOf.Equal(right.AsOf) && left.PrincipalOutstanding.Cmp(right.PrincipalOutstanding) == 0 &&
+	return left.AsOf.Equal(right.AsOf) && left.LoanStartDate.Equal(right.LoanStartDate) && left.PrincipalOutstanding.Cmp(right.PrincipalOutstanding) == 0 &&
 		left.PrincipalDue.Cmp(right.PrincipalDue) == 0 && left.InterestDue.Cmp(right.InterestDue) == 0 &&
 		left.CollectabilityBI == right.CollectabilityBI && left.Branch == right.Branch && left.Product == right.Product && left.CIF == right.CIF && left.ContractNumber == right.ContractNumber
 }

@@ -82,21 +82,25 @@ func (service *Service) GetLoanPosition(ctx context.Context, account string, asO
 			AsOf: asOf, AccountNumber: primary, CollectabilityBI: contract.CurrentCollectability, Source: loan.SourceClosed,
 		}}, nil
 	}
-	if !contract.DisbursementDate.IsZero() && contract.DisbursementDate.After(service.cutoff) && asOf.Before(contract.DisbursementDate) {
-		return loan.ResolvedPosition{}, fmt.Errorf("%w: reporting date precedes Fincloud-native disbursement", loan.ErrHistoricalEvidence)
-	}
-	if !asOf.Before(service.cutoff) {
-		if contract.DisbursementDate.IsZero() {
-			return loan.ResolvedPosition{}, fmt.Errorf("%w: Fincloud disbursement date is missing", loan.ErrHistoricalEvidence)
+	var exact loan.LoanPosition
+	if asOf.After(service.cutoff) {
+		exact, err = service.exactPosition(ctx, primary, asOf, today)
+		if err != nil {
+			if asOf.Equal(today) && errors.Is(err, loan.ErrNotFound) {
+				return loan.ResolvedPosition{}, errors.Join(loan.ErrCurrentSnapshot, err)
+			}
+			return loan.ResolvedPosition{}, err
 		}
-		if contract.DisbursementDate.After(service.cutoff) {
-			position, err := service.exactPosition(ctx, primary, asOf, today)
+		if exact.LoanStartDate.IsZero() || exact.LoanStartDate.After(asOf) {
+			return loan.ResolvedPosition{}, fmt.Errorf("%w: exact position has invalid loan start date", loan.ErrHistoricalEvidence)
+		}
+		if exact.LoanStartDate.After(service.cutoff) {
 			selected, reason := loan.SourceDWH, "fincloud_native_historical"
 			if asOf.Equal(today) {
 				selected, reason = loan.SourceTodaySnapshot, "fincloud_native_today"
 			}
 			logDecision(ctx, contract, "", selected, reason)
-			return loan.ResolvedPosition{Loan: contract, Position: position}, err
+			return loan.ResolvedPosition{Loan: contract, Position: exact}, nil
 		}
 	}
 	alternate := strings.TrimSpace(contract.AlternateAccount)
@@ -122,13 +126,12 @@ func (service *Service) GetLoanPosition(ctx context.Context, account string, asO
 		return loan.ResolvedPosition{Loan: contract, Position: openingPosition(opening, asOf)}, nil
 	}
 	if opening.InterestType != FlatInterestType {
-		position, err := service.exactPosition(ctx, primary, asOf, today)
 		selected := loan.SourceDWH
 		if asOf.Equal(today) {
 			selected = loan.SourceTodaySnapshot
 		}
 		logDecision(ctx, contract, opening.InterestType, selected, "non_flat_interest_type")
-		return loan.ResolvedPosition{Loan: contract, Position: position}, err
+		return loan.ResolvedPosition{Loan: contract, Position: exact}, nil
 	}
 	if contract.ContractScheduleEvidence != nil {
 		contract.ContractSchedule, err = normalizeContractSchedule(contract.ContractScheduleEvidence, contract.TenorMonths, service.location)
@@ -151,14 +154,7 @@ func (service *Service) GetLoanPosition(ctx context.Context, account string, asO
 		return loan.ResolvedPosition{}, err
 	}
 	if asOf.Equal(today) {
-		current, err := service.snapshot.ExactPosition(ctx, primary, today)
-		if err != nil {
-			if errors.Is(err, loan.ErrNotFound) {
-				return loan.ResolvedPosition{}, errors.Join(loan.ErrCurrentSnapshot, err)
-			}
-			return loan.ResolvedPosition{}, err
-		}
-		timeline = append(timeline, loan.CollectabilityPoint{Date: today, Value: current.CollectabilityBI})
+		timeline = append(timeline, loan.CollectabilityPoint{Date: today, Value: exact.CollectabilityBI})
 	}
 	calculation, err := service.calculator.Calculate(loan.CalculationInput{
 		AsOf: asOf, Cutoff: service.cutoff, ContractualPrincipal: contract.PlafondLimit, TenorMonths: contract.TenorMonths,
@@ -169,7 +165,7 @@ func (service *Service) GetLoanPosition(ctx context.Context, account string, asO
 		return loan.ResolvedPosition{}, err
 	}
 	position := loan.LoanPosition{
-		AsOf: asOf, AccountNumber: primary, PrincipalOutstanding: calculation.PrincipalOutstanding,
+		AsOf: asOf, LoanStartDate: exact.LoanStartDate, AccountNumber: primary, PrincipalOutstanding: calculation.PrincipalOutstanding,
 		PrincipalDue: calculation.PrincipalDue, InterestDue: calculation.InterestDue,
 		CollectabilityBI: calculation.CollectabilityBI, UnappliedAmount: calculation.UnappliedAmount, Source: loan.SourceReconstructed,
 	}

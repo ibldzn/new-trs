@@ -2,6 +2,7 @@ package dwh
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"reflect"
 	"strings"
@@ -37,6 +38,7 @@ func (database *databaseFake) SelectContext(_ context.Context, destination any, 
 func TestExactPositionQueriesPrimaryAccountThenDate(t *testing.T) {
 	database := &databaseFake{getRow: positionRow{
 		AsOf: time.Date(2026, time.September, 13, 0, 0, 0, 0, time.UTC), AccountNumber: "primary",
+		PeriodStart:          sql.NullString{String: "01/06/2024", Valid: true},
 		PrincipalOutstanding: loan.MustMoney("100"), CollectabilityBI: 2,
 	}}
 	repository := &Repository{database: database, location: time.UTC}
@@ -46,14 +48,54 @@ func TestExactPositionQueriesPrimaryAccountThenDate(t *testing.T) {
 		t.Fatal(err)
 	}
 	query := strings.Join(strings.Fields(database.getQuery), " ")
-	if !strings.Contains(query, "WHERE no_rekening = ? AND as_of_date = ?") || strings.Contains(query, "business_key_hash") {
+	if !strings.Contains(query, "SELECT as_of_date, no_rekening, periode_mulai") || !strings.Contains(query, "WHERE no_rekening = ? AND as_of_date = ?") || strings.Contains(query, "business_key_hash") {
 		t.Fatalf("query = %s", query)
 	}
 	if !reflect.DeepEqual(database.getArgs, []any{"primary", "2026-09-13"}) {
 		t.Fatalf("args = %#v", database.getArgs)
 	}
-	if position.AccountNumber != "primary" || position.Source != loan.SourceDWH {
+	if position.AccountNumber != "primary" || position.Source != loan.SourceDWH || position.LoanStartDate.String() != "2024-06-01" {
 		t.Fatalf("position = %+v", position)
+	}
+}
+
+func TestExactPositionParsesPeriodStartStrictly(t *testing.T) {
+	for _, test := range []struct {
+		name, raw, want string
+		valid           bool
+	}{
+		{"unambiguous day and month", "03/04/2025", "2025-04-03", true},
+		{"day after cutoff", "13/10/2025", "2025-10-13", true},
+		{"surrounding whitespace", " 13/10/2025 ", "2025-10-13", true},
+		{"ISO is not source format", "2025-10-13", "", false},
+		{"invalid month", "10/13/2025", "", false},
+		{"empty", "", "", false},
+		{"un-padded", "3/4/2025", "", false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			database := &databaseFake{getRow: positionRow{
+				AsOf: time.Date(2026, time.August, 31, 0, 0, 0, 0, time.UTC), AccountNumber: "primary",
+				PeriodStart: sql.NullString{String: test.raw, Valid: true}, CollectabilityBI: 2,
+			}}
+			repository := &Repository{database: database, location: time.FixedZone("Jakarta", 7*60*60)}
+			asOf, _ := loan.ParseDate("2026-08-31", time.UTC)
+			position, err := repository.ExactPosition(context.Background(), "primary", asOf)
+			if test.valid {
+				if err != nil || position.LoanStartDate.String() != test.want {
+					t.Fatalf("position=%+v error=%v", position, err)
+				}
+			} else if !errors.Is(err, loan.ErrHistoricalEvidence) {
+				t.Fatalf("error=%v", err)
+			}
+		})
+	}
+	for _, period := range []sql.NullString{{}, {String: "13/10/2025", Valid: false}} {
+		database := &databaseFake{getRow: positionRow{PeriodStart: period, CollectabilityBI: 2}}
+		repository := &Repository{database: database, location: time.UTC}
+		asOf, _ := loan.ParseDate("2026-08-31", time.UTC)
+		if _, err := repository.ExactPosition(context.Background(), "primary", asOf); !errors.Is(err, loan.ErrHistoricalEvidence) {
+			t.Fatalf("null period=%+v error=%v", period, err)
+		}
 	}
 }
 

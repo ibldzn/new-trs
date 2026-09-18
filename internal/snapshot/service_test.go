@@ -108,6 +108,7 @@ func TestRefreshFailurePreservesPreviousSnapshot(t *testing.T) {
 	}{
 		{"fetch", &sourceFake{err: errors.New("upstream down")}},
 		{"validation", &sourceFake{rows: []loan.LoanPosition{positionRow(today, "same", "10"), positionRow(today, "same", "10")}}},
+		{"missing loan start date", &sourceFake{rows: []loan.LoanPosition{{AsOf: today, AccountNumber: "new", PrincipalOutstanding: loan.MustMoney("10"), CollectabilityBI: 1}}}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			store := &storeFake{rows: []loan.LoanPosition{positionRow(today, "old", "9")}}
@@ -147,7 +148,8 @@ func TestRefreshCannotOverlap(t *testing.T) {
 }
 
 func positionRow(date loan.Date, account, principal string) loan.LoanPosition {
-	return loan.LoanPosition{AsOf: date, AccountNumber: account, PrincipalOutstanding: loan.MustMoney(principal), CollectabilityBI: 1}
+	start, _ := loan.ParseDate("2024-06-01", time.UTC)
+	return loan.LoanPosition{AsOf: date, LoanStartDate: start, AccountNumber: account, PrincipalOutstanding: loan.MustMoney(principal), CollectabilityBI: 1}
 }
 
 func auditAttribution() audit.Attribution { return audit.Attribution{} }

@@ -26,12 +26,13 @@ func NewRepository(database *sqlx.DB, location *time.Location) *Repository {
 }
 
 type positionRow struct {
-	AsOf                 time.Time  `db:"as_of_date"`
-	AccountNumber        string     `db:"no_rekening"`
-	PrincipalOutstanding loan.Money `db:"sisa_pokok_pinjaman"`
-	CollectabilityBI     int        `db:"kolektibilitas_bi"`
-	PrincipalDue         loan.Money `db:"tunggakan_pokok"`
-	InterestDue          loan.Money `db:"tunggakan_bunga"`
+	AsOf                 time.Time      `db:"as_of_date"`
+	AccountNumber        string         `db:"no_rekening"`
+	PeriodStart          sql.NullString `db:"periode_mulai"`
+	PrincipalOutstanding loan.Money     `db:"sisa_pokok_pinjaman"`
+	CollectabilityBI     int            `db:"kolektibilitas_bi"`
+	PrincipalDue         loan.Money     `db:"tunggakan_pokok"`
+	InterestDue          loan.Money     `db:"tunggakan_bunga"`
 }
 
 type collectabilityRow struct {
@@ -41,7 +42,7 @@ type collectabilityRow struct {
 
 func (repository *Repository) ExactPosition(ctx context.Context, account string, asOf loan.Date) (loan.LoanPosition, error) {
 	const query = `
-		SELECT as_of_date, no_rekening, sisa_pokok_pinjaman, kolektibilitas_bi, tunggakan_pokok, tunggakan_bunga
+		SELECT as_of_date, no_rekening, periode_mulai, sisa_pokok_pinjaman, kolektibilitas_bi, tunggakan_pokok, tunggakan_bunga
 		FROM dwhv2.fincloud_eod_detail_outstanding_rekening_pinjaman
 		WHERE no_rekening = ? AND as_of_date = ?
 		LIMIT 1`
@@ -55,8 +56,13 @@ func (repository *Repository) ExactPosition(ctx context.Context, account string,
 	if err := validateBalances(row.PrincipalOutstanding, row.PrincipalDue, row.InterestDue, row.CollectabilityBI); err != nil {
 		return loan.LoanPosition{}, err
 	}
+	periodStart := strings.TrimSpace(row.PeriodStart.String)
+	parsedStart, err := time.ParseInLocation("02/01/2006", periodStart, repository.location)
+	if !row.PeriodStart.Valid || err != nil || parsedStart.Format("02/01/2006") != periodStart {
+		return loan.LoanPosition{}, fmt.Errorf("%w: invalid DWH periode_mulai", loan.ErrHistoricalEvidence)
+	}
 	return loan.LoanPosition{
-		AsOf: loan.NewDate(row.AsOf, repository.location), AccountNumber: strings.TrimSpace(row.AccountNumber),
+		AsOf: loan.NewDate(row.AsOf, repository.location), LoanStartDate: loan.NewDate(parsedStart, repository.location), AccountNumber: strings.TrimSpace(row.AccountNumber),
 		PrincipalOutstanding: row.PrincipalOutstanding, PrincipalDue: row.PrincipalDue, InterestDue: row.InterestDue,
 		CollectabilityBI: row.CollectabilityBI, Source: loan.SourceDWH,
 	}, nil

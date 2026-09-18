@@ -14,6 +14,7 @@ const (
 
 type LoanPosition struct {
 	AsOf                 Date
+	LoanStartDate        Date
 	AccountNumber        string
 	PrincipalOutstanding Money
 	PrincipalDue         Money
@@ -90,7 +91,6 @@ type ContractData struct {
 	PenaltyDue               Money
 	Status                   string
 	CloseDate                Date
-	DisbursementDate         Date
 	RawScheduleCount         int
 	ContractScheduleEvidence []ContractualInstallmentEvidence
 	ContractSchedule         []ContractualInstallment
