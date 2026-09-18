@@ -122,7 +122,7 @@ func parseCollectabilityBI(value string) (int, error) {
 	switch strings.ToUpper(strings.TrimSpace(value)) {
 	case "1", "L":
 		return 1, nil
-	case "2", "DPK":
+	case "2", "DPK", "DP":
 		return 2, nil
 	case "3", "KL":
 		return 3, nil

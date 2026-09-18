@@ -10,7 +10,7 @@ import (
 func TestParseCollectabilityBI(t *testing.T) {
 	for input, want := range map[string]int{
 		"1": 1, "L": 1,
-		"2": 2, "DPK": 2,
+		"2": 2, "DPK": 2, "DP": 2,
 		"3": 3, "KL": 3,
 		"4": 4, "D": 4,
 		"5": 5, "M": 5,
