@@ -26,8 +26,8 @@ import (
 	"github.com/ibldzn/trs/internal/platform/navigation"
 	"github.com/ibldzn/trs/internal/position"
 	"github.com/ibldzn/trs/internal/render"
-	corereporting "github.com/ibldzn/trs/internal/reporting"
 	"github.com/ibldzn/trs/internal/server"
+	"github.com/ibldzn/trs/internal/slik"
 	"github.com/ibldzn/trs/internal/snapshot"
 	"github.com/ibldzn/trs/internal/user"
 	webfiles "github.com/ibldzn/trs/web"
@@ -164,11 +164,12 @@ func Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("initialize position service: %w", err)
 	}
-	reportingManager, err := corereporting.NewManager(ctx, positionService, applicationConfig.Reporting.Concurrency, appendAudit, logger)
+	slikManager, err := slik.NewManager(ctx, slik.NewRepository(databaseConnection), positionService,
+		slik.Config{Concurrency: applicationConfig.SLIK.Concurrency, MaxUploadBytes: applicationConfig.SLIK.MaxUploadBytes, StorageDir: applicationConfig.SLIK.StorageDir}, appendAudit, logger)
 	if err != nil {
-		return fmt.Errorf("initialize reporting: %w", err)
+		return fmt.Errorf("initialize SLIK: %w", err)
 	}
-	defer reportingManager.Close()
+	defer slikManager.Close()
 	lpsGenerator, err := corelps.NewGenerator(fincloudClient, fincloudClient, msoRepository, corelps.NewHTTPRateProvider(nil), location)
 	if err != nil {
 		return fmt.Errorf("initialize LPS: %w", err)
@@ -207,8 +208,8 @@ func Run(ctx context.Context) error {
 			registerFeatureRoutes(router, featureDependencies{
 				database: databaseConnection, users: userRepository, access: accessRepository,
 				admin: adminHTTP, cookies: cookieManager,
-				positions: positionService, snapshot: snapshotService, reporting: reportingManager, lps: lpsGenerator,
-				location: location, maxReportingUpload: applicationConfig.Reporting.MaxUploadBytes,
+				positions: positionService, snapshot: snapshotService, slik: slikManager, lps: lpsGenerator,
+				location: location, maxSLIKUpload: applicationConfig.SLIK.MaxUploadBytes,
 				lpsDefaultCode: applicationConfig.LPS.DefaultParticipantCode, appendAudit: appendAudit, logger: logger,
 			})
 		},

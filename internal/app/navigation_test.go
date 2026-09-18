@@ -8,8 +8,8 @@ import (
 	"github.com/ibldzn/trs/internal/features/dashboard"
 	"github.com/ibldzn/trs/internal/features/loaninquiry"
 	featurelps "github.com/ibldzn/trs/internal/features/lps"
-	featurereporting "github.com/ibldzn/trs/internal/features/reporting"
 	"github.com/ibldzn/trs/internal/features/roles"
+	featureslik "github.com/ibldzn/trs/internal/features/slik"
 	"github.com/ibldzn/trs/internal/features/snapshots"
 	"github.com/ibldzn/trs/internal/features/users"
 	"github.com/ibldzn/trs/internal/platform/navigation"
@@ -33,7 +33,7 @@ func TestPhaseFourNavigation(t *testing.T) {
 		{name: "roles", path: "/roles/7", permissions: []string{roles.PermissionView}, groups: 1, active: "roles", open: "access-control"},
 		{name: "audit", path: "/audit-logs/7", permissions: []string{auditlogs.PermissionView}, groups: 1, active: "audit-logs"},
 		{name: "loan inquiry", path: "/loans", permissions: []string{loaninquiry.PermissionInquiry}, groups: 1, active: "loan-inquiry"},
-		{name: "bulk reporting", path: "/reports/7", permissions: []string{featurereporting.PermissionGenerate}, groups: 1, active: "reporting"},
+		{name: "SLIK", path: "/slik/7", permissions: []string{featureslik.PermissionGenerate}, groups: 1, active: "slik"},
 		{name: "LPS", path: "/lps", permissions: []string{featurelps.PermissionGenerate}, groups: 1, active: "lps"},
 		{name: "snapshot", path: "/snapshot", permissions: []string{snapshots.PermissionView}, groups: 1, active: "snapshot"},
 		{name: "management hidden", path: "/", permissions: nil, groups: 0},
@@ -69,11 +69,11 @@ func TestPermissionAggregation(t *testing.T) {
 		users.PermissionDisable: true, users.PermissionResetPassword: true,
 		roles.PermissionView: true, roles.PermissionCreate: true, roles.PermissionUpdate: true,
 		roles.PermissionDelete: true, roles.PermissionAssign: true, roles.PermissionManagePermissions: true,
-		auditlogs.PermissionView:            true,
-		loaninquiry.PermissionInquiry:       true,
-		featurereporting.PermissionGenerate: true,
-		featurelps.PermissionGenerate:       true,
-		snapshots.PermissionView:            true, snapshots.PermissionRefresh: true,
+		auditlogs.PermissionView:       true,
+		loaninquiry.PermissionInquiry:  true,
+		featureslik.PermissionGenerate: true,
+		featurelps.PermissionGenerate:  true,
+		snapshots.PermissionView:       true, snapshots.PermissionRefresh: true,
 	}
 	for _, definition := range definitions {
 		delete(want, definition.Key)

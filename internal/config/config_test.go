@@ -28,8 +28,8 @@ func TestParseDefaults(t *testing.T) {
 	if config.APIKey != "" {
 		t.Fatalf("API should be disabled by default")
 	}
-	if config.Snapshot.RefreshInterval != 3*time.Hour || !config.Snapshot.RefreshOnStart || config.Reporting.Concurrency != 8 {
-		t.Fatalf("unexpected integration defaults: snapshot=%+v reporting=%+v", config.Snapshot, config.Reporting)
+	if config.Snapshot.RefreshInterval != 3*time.Hour || !config.Snapshot.RefreshOnStart || config.SLIK.Concurrency != 16 || config.SLIK.MaxUploadBytes != 64<<20 || config.SLIK.StorageDir != "./data/slik" {
+		t.Fatalf("unexpected integration defaults: snapshot=%+v SLIK=%+v", config.Snapshot, config.SLIK)
 	}
 }
 
@@ -59,7 +59,10 @@ func TestParseValidation(t *testing.T) {
 		{"invalid timezone", baseValues("APP_TIMEZONE", "Mars/Olympus"), "APP_TIMEZONE"},
 		{"invalid snapshot interval", baseValues("TODAY_SNAPSHOT_REFRESH_INTERVAL", "0s"), "TODAY_SNAPSHOT_REFRESH_INTERVAL"},
 		{"invalid snapshot start", baseValues("TODAY_SNAPSHOT_REFRESH_ON_START", "sometimes"), "TODAY_SNAPSHOT_REFRESH_ON_START"},
-		{"invalid reporting concurrency", baseValues("REPORTING_CONCURRENCY", "100"), "REPORTING_CONCURRENCY"},
+		{"invalid SLIK concurrency", baseValues("SLIK_CONCURRENCY", "100"), "SLIK_CONCURRENCY"},
+		{"invalid SLIK upload limit", baseValues("SLIK_MAX_UPLOAD_BYTES", "0"), "SLIK_MAX_UPLOAD_BYTES"},
+		{"excessive SLIK upload limit", baseValues("SLIK_MAX_UPLOAD_BYTES", "268435457"), "SLIK_MAX_UPLOAD_BYTES"},
+		{"missing SLIK storage", baseValues("SLIK_STORAGE_DIR", ""), "SLIK_STORAGE_DIR"},
 	}
 
 	for _, test := range tests {

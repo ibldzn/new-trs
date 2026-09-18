@@ -17,7 +17,7 @@ import (
 	"github.com/ibldzn/trs/internal/browserauth"
 	"github.com/ibldzn/trs/internal/features/loaninquiry"
 	featurelps "github.com/ibldzn/trs/internal/features/lps"
-	featurereporting "github.com/ibldzn/trs/internal/features/reporting"
+	featureslik "github.com/ibldzn/trs/internal/features/slik"
 	"github.com/ibldzn/trs/internal/features/snapshots"
 	"github.com/ibldzn/trs/internal/platform/adminshell"
 	"github.com/ibldzn/trs/internal/platform/navigation"
@@ -47,8 +47,8 @@ func TestBusinessPermissionsAreIndependentAndServerEnforced(t *testing.T) {
 	}{
 		{"loan denied", "/loan", http.MethodGet, access.UserRoleSlug, nil, http.StatusForbidden},
 		{"loan allowed for any username", "/loan", http.MethodGet, access.UserRoleSlug, []string{loaninquiry.PermissionInquiry}, http.StatusNoContent},
-		{"reporting does not grant LPS", "/lps", http.MethodGet, access.UserRoleSlug, []string{featurereporting.PermissionGenerate}, http.StatusForbidden},
-		{"LPS does not grant reporting", "/report", http.MethodGet, access.UserRoleSlug, []string{featurelps.PermissionGenerate}, http.StatusForbidden},
+		{"SLIK does not grant LPS", "/lps", http.MethodGet, access.UserRoleSlug, []string{featureslik.PermissionGenerate}, http.StatusForbidden},
+		{"LPS does not grant SLIK", "/slik", http.MethodGet, access.UserRoleSlug, []string{featurelps.PermissionGenerate}, http.StatusForbidden},
 		{"snapshot view does not grant refresh", "/snapshot/refresh", http.MethodPost, access.UserRoleSlug, []string{snapshots.PermissionView}, http.StatusForbidden},
 		{"snapshot refresh does not grant view", "/snapshot", http.MethodGet, access.UserRoleSlug, []string{snapshots.PermissionRefresh}, http.StatusForbidden},
 		{"admin bypass", "/snapshot/refresh", http.MethodPost, access.AdminRoleSlug, nil, http.StatusNoContent},
@@ -116,7 +116,7 @@ func businessRBACRouter(t *testing.T, principal browserauth.Principal) (http.Han
 		protected.With(admin.RequirePermission(loaninquiry.PermissionInquiry)).Get("/fincloud-failure", func(writer http.ResponseWriter, _ *http.Request) {
 			http.Error(writer, "upstream unavailable", http.StatusServiceUnavailable)
 		})
-		protected.With(admin.RequirePermission(featurereporting.PermissionGenerate)).Get("/report", noContent)
+		protected.With(admin.RequirePermission(featureslik.PermissionGenerate)).Get("/slik", noContent)
 		protected.With(admin.RequirePermission(featurelps.PermissionGenerate)).Get("/lps", noContent)
 		protected.With(admin.RequirePermission(snapshots.PermissionView)).Get("/snapshot", noContent)
 		protected.With(admin.RequirePermission(snapshots.PermissionRefresh)).Post("/snapshot/refresh", noContent)

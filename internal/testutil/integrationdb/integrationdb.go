@@ -69,7 +69,7 @@ func Reset(t *testing.T, db *sqlx.DB, definitions []access.PermissionDefinition)
 		t.Fatal(err)
 	}
 	defer connection.ExecContext(context.Background(), `SET FOREIGN_KEY_CHECKS = 1`)
-	for _, table := range []string{"audit_logs", "sessions", "role_permissions", "users", "permissions", "roles"} {
+	for _, table := range []string{"slik_job_accounts", "slik_jobs", "audit_logs", "sessions", "role_permissions", "users", "permissions", "roles"} {
 		if _, err := connection.ExecContext(context.Background(), `TRUNCATE TABLE `+table); err != nil {
 			t.Fatalf("truncate integration table %s: %v", table, err)
 		}

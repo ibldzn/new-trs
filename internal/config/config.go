@@ -26,21 +26,21 @@ const (
 	defaultSnapshotInterval        = 3 * time.Hour
 	defaultFincloudTimeout         = 30 * time.Second
 	defaultReportLimit             = 100 << 20
-	defaultReportingConcurrency    = 8
-	defaultReportingUploadLimit    = 2 << 20
+	defaultSLIKConcurrency         = 16
+	defaultSLIKUploadLimit         = 64 << 20
 )
 
 type Config struct {
-	App       AppConfig
-	APIKey    string
-	Database  DatabaseConfig
-	Session   SessionConfig
-	DWH       ExternalDatabaseConfig
-	MSO       ExternalDatabaseConfig
-	Fincloud  FincloudConfig
-	Snapshot  SnapshotConfig
-	Reporting ReportingConfig
-	LPS       LPSConfig
+	App      AppConfig
+	APIKey   string
+	Database DatabaseConfig
+	Session  SessionConfig
+	DWH      ExternalDatabaseConfig
+	MSO      ExternalDatabaseConfig
+	Fincloud FincloudConfig
+	Snapshot SnapshotConfig
+	SLIK     SLIKConfig
+	LPS      LPSConfig
 }
 
 type AppConfig struct {
@@ -100,9 +100,10 @@ type SnapshotConfig struct {
 	RefreshOnStart  bool
 }
 
-type ReportingConfig struct {
+type SLIKConfig struct {
 	Concurrency    int
 	MaxUploadBytes int64
+	StorageDir     string
 }
 
 type LPSConfig struct{ DefaultParticipantCode string }
@@ -169,13 +170,16 @@ func parse(lookup lookupEnv) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	reportingConcurrency, err := parsePositiveInt("REPORTING_CONCURRENCY", value("REPORTING_CONCURRENCY", strconv.Itoa(defaultReportingConcurrency)), 64)
+	slikConcurrency, err := parsePositiveInt("SLIK_CONCURRENCY", value("SLIK_CONCURRENCY", strconv.Itoa(defaultSLIKConcurrency)), 32)
 	if err != nil {
 		return Config{}, err
 	}
-	reportingUploadLimit, err := parsePositiveInt64("REPORTING_MAX_UPLOAD_BYTES", value("REPORTING_MAX_UPLOAD_BYTES", strconv.FormatInt(defaultReportingUploadLimit, 10)))
+	slikUploadLimit, err := parsePositiveInt64("SLIK_MAX_UPLOAD_BYTES", value("SLIK_MAX_UPLOAD_BYTES", strconv.FormatInt(defaultSLIKUploadLimit, 10)))
 	if err != nil {
 		return Config{}, err
+	}
+	if slikUploadLimit > 256<<20 {
+		return Config{}, fmt.Errorf("SLIK_MAX_UPLOAD_BYTES must not exceed 268435456")
 	}
 
 	config := Config{
@@ -212,9 +216,9 @@ func parse(lookup lookupEnv) (Config, error) {
 			RoleID: strings.TrimSpace(value("FINCLOUD_SYSTEM_ROLE_ID", "")), CAFile: strings.TrimSpace(value("FINCLOUD_CA_FILE", "")),
 			InsecureTLS: fincloudInsecureTLS, Timeout: fincloudTimeout, MaxReportSize: maxReportSize,
 		},
-		Snapshot:  SnapshotConfig{RefreshInterval: snapshotInterval, RefreshOnStart: snapshotOnStart},
-		Reporting: ReportingConfig{Concurrency: reportingConcurrency, MaxUploadBytes: reportingUploadLimit},
-		LPS:       LPSConfig{DefaultParticipantCode: strings.TrimSpace(value("LPS_DEFAULT_KODE_KEPESERTAAN", "31300082"))},
+		Snapshot: SnapshotConfig{RefreshInterval: snapshotInterval, RefreshOnStart: snapshotOnStart},
+		SLIK:     SLIKConfig{Concurrency: slikConcurrency, MaxUploadBytes: slikUploadLimit, StorageDir: strings.TrimSpace(value("SLIK_STORAGE_DIR", "./data/slik"))},
+		LPS:      LPSConfig{DefaultParticipantCode: strings.TrimSpace(value("LPS_DEFAULT_KODE_KEPESERTAAN", "31300082"))},
 	}
 
 	if err := validate(config); err != nil {
@@ -236,6 +240,7 @@ func validate(config Config) error {
 		{"DB_NAME", config.Database.Name},
 		{"DB_USER", config.Database.User},
 		{"SESSION_COOKIE_NAME", config.Session.CookieName},
+		{"SLIK_STORAGE_DIR", config.SLIK.StorageDir},
 	}
 	for _, field := range required {
 		if field.value == "" {

@@ -37,10 +37,10 @@ func TestFeatureCompositionOwnsCompleteRouteMatrix(t *testing.T) {
 	}
 	sort.Strings(routes)
 	want := []string{
-		"GET /", "GET /audit-logs", "GET /audit-logs/{id}", "GET /loans", "GET /lps", "GET /reports", "GET /reports/{id}", "GET /reports/{id}/download", "GET /reports/{id}/status",
+		"GET /", "GET /audit-logs", "GET /audit-logs/{id}", "GET /loans", "GET /lps", "GET /slik", "GET /slik/{id}", "GET /slik/{id}/download", "GET /slik/{id}/status",
 		"GET /roles", "GET /roles/new", "GET /roles/{id}", "GET /roles/{id}/edit", "GET /snapshot",
 		"GET /users", "GET /users/new", "GET /users/{id}", "GET /users/{id}/edit", "GET /users/{id}/reset-password",
-		"POST /impersonation/stop", "POST /loans/inquiry", "POST /lps", "POST /reports", "POST /reports/{id}/cancel", "POST /roles", "POST /roles/{id}", "POST /roles/{id}/delete", "POST /roles/{id}/permissions", "POST /snapshot/refresh",
+		"POST /impersonation/stop", "POST /loans/inquiry", "POST /lps", "POST /slik", "POST /slik/{id}/cancel", "POST /roles", "POST /roles/{id}", "POST /roles/{id}/delete", "POST /roles/{id}/permissions", "POST /snapshot/refresh",
 		"POST /users", "POST /users/{id}", "POST /users/{id}/activate", "POST /users/{id}/deactivate", "POST /users/{id}/impersonate", "POST /users/{id}/reset-password", "POST /users/{id}/role",
 	}
 	sort.Strings(want)

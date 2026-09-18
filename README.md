@@ -1,6 +1,6 @@
 # THOR Rate Sync
 
-Goment-based internal banking application for contractual loan positions, bulk reports, current-day snapshots, and LPS archives.
+Goment-based internal banking application for contractual loan positions, SLIK workbooks, current-day snapshots, and LPS archives.
 
 ## Architecture
 
@@ -10,6 +10,15 @@ Goment-based internal banking application for contractual loan positions, bulk r
 - Read-only actual DWH H-1 evidence.
 - Application-owned H snapshot refreshed from Fincloud `Loan Outstanding Details Report Today`.
 - Pure exact-rational contractual calculator under `internal/contractual`.
+- Durable SLIK queue in application MySQL; one active job with bounded account workers.
+
+## SLIK generator
+
+Run `make migrate` before deploying this version. Existing `reporting.generate` role assignments remain valid for `/slik`.
+
+Upload an `.xlsx` workbook containing `nomorekeningfasilitas`, `bakidebet`, and `sukubungaimbalan` in one header row on exactly one sheet. Supply reporting date separately. SLIK updates only target cell values, retains workbook structure, and fails without output on first account error. Duplicate account identifiers are processed once. Completed, failed, and canceled job files expire seven days after termination; metadata remains.
+
+`SLIK_CONCURRENCY=16` controls account workers (valid range 1–32). Each account has a two-minute deadline; Fincloud HTTP has its existing configured timeout. `SLIK_MAX_UPLOAD_BYTES=67108864` limits compressed upload bytes (configurable up to 256 MiB). XLSX parsing also caps ZIP entries at 2048, total uncompressed bytes at 512 MiB, and each member at 256 MiB. `SLIK_STORAGE_DIR=./data/slik` stores input and output files privately. Persist this directory with a durable volume in containers; give the app user read/write access. Multiple app instances must share the same storage volume. One SLIK job runs globally using a MySQL advisory lock. Interrupted jobs resume from successful checkpoints after restart. Database migrations do not run during application startup.
 
 ## Setup
 

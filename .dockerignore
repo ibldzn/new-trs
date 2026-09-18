@@ -4,4 +4,6 @@
 bin
 node_modules
 tmp
+data
+*.xlsx
 *.log

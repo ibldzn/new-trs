@@ -186,10 +186,10 @@ func TestAuthGuards(t *testing.T) {
 	handler := newTestHTTP(t, &fakeHTTPService{}, false)
 
 	t.Run("guest redirect", func(t *testing.T) {
-		request := httptest.NewRequest(http.MethodGet, "/reports?month=8", nil)
+		request := httptest.NewRequest(http.MethodGet, "/slik?month=8", nil)
 		response := httptest.NewRecorder()
 		handler.RequireAuth(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})).ServeHTTP(response, request)
-		if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/login?next=%2Freports%3Fmonth%3D8" {
+		if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/login?next=%2Fslik%3Fmonth%3D8" {
 			t.Fatalf("unexpected redirect: status=%d location=%q", response.Code, response.Header().Get("Location"))
 		}
 	})

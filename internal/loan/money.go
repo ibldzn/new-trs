@@ -95,6 +95,44 @@ func (money Money) String() string {
 	return value
 }
 
+// ExactDecimal returns the full decimal value when its rational form terminates.
+func (money Money) ExactDecimal() (string, error) {
+	value := money.rat()
+	denominator := new(big.Int).Set(value.Denom())
+	two, five := 0, 0
+	for new(big.Int).Mod(denominator, big.NewInt(2)).Sign() == 0 {
+		denominator.Div(denominator, big.NewInt(2))
+		two++
+	}
+	for new(big.Int).Mod(denominator, big.NewInt(5)).Sign() == 0 {
+		denominator.Div(denominator, big.NewInt(5))
+		five++
+	}
+	if denominator.Cmp(big.NewInt(1)) != 0 {
+		return "", fmt.Errorf("money has no exact finite decimal")
+	}
+	scale := max(two, five)
+	digits := new(big.Int).Abs(value.Num())
+	if scale > two {
+		digits.Mul(digits, new(big.Int).Exp(big.NewInt(2), big.NewInt(int64(scale-two)), nil))
+	}
+	if scale > five {
+		digits.Mul(digits, new(big.Int).Exp(big.NewInt(5), big.NewInt(int64(scale-five)), nil))
+	}
+	raw := digits.String()
+	if scale > 0 {
+		if len(raw) <= scale {
+			raw = strings.Repeat("0", scale-len(raw)+1) + raw
+		}
+		raw = raw[:len(raw)-scale] + "." + raw[len(raw)-scale:]
+		raw = strings.TrimRight(strings.TrimRight(raw, "0"), ".")
+	}
+	if value.Sign() < 0 && raw != "0" {
+		return "-" + raw, nil
+	}
+	return raw, nil
+}
+
 func (money *Money) Scan(source any) error {
 	var raw string
 	switch value := source.(type) {

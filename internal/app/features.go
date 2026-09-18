@@ -17,15 +17,15 @@ import (
 	"github.com/ibldzn/trs/internal/features/impersonation"
 	"github.com/ibldzn/trs/internal/features/loaninquiry"
 	featurelps "github.com/ibldzn/trs/internal/features/lps"
-	featurereporting "github.com/ibldzn/trs/internal/features/reporting"
 	"github.com/ibldzn/trs/internal/features/roles"
+	featureslik "github.com/ibldzn/trs/internal/features/slik"
 	"github.com/ibldzn/trs/internal/features/snapshots"
 	"github.com/ibldzn/trs/internal/features/users"
 	"github.com/ibldzn/trs/internal/loan"
 	corelps "github.com/ibldzn/trs/internal/lps"
 	"github.com/ibldzn/trs/internal/platform/adminshell"
 	"github.com/ibldzn/trs/internal/platform/navigation"
-	"github.com/ibldzn/trs/internal/reporting"
+	"github.com/ibldzn/trs/internal/slik"
 	"github.com/ibldzn/trs/internal/snapshot"
 	"github.com/ibldzn/trs/internal/user"
 )
@@ -37,7 +37,7 @@ func PermissionDefinitions() []access.PermissionDefinition {
 	definitions = append(definitions, roles.PermissionDefinitions()...)
 	definitions = append(definitions, auditlogs.PermissionDefinitions()...)
 	definitions = append(definitions, loaninquiry.PermissionDefinitions()...)
-	definitions = append(definitions, featurereporting.PermissionDefinitions()...)
+	definitions = append(definitions, featureslik.PermissionDefinitions()...)
 	definitions = append(definitions, featurelps.PermissionDefinitions()...)
 	definitions = append(definitions, snapshots.PermissionDefinitions()...)
 	return definitions
@@ -56,15 +56,15 @@ type featureDependencies struct {
 		Status(context.Context) (snapshot.Status, error)
 		Refresh(context.Context, snapshot.Trigger, audit.Attribution) (int, error)
 	}
-	reporting *reporting.Manager
-	lps       interface {
+	slik *slik.Manager
+	lps  interface {
 		Generate(context.Context, corelps.Input, io.Writer) (corelps.Result, error)
 	}
-	location           *time.Location
-	maxReportingUpload int64
-	lpsDefaultCode     string
-	appendAudit        func(context.Context, audit.Event) error
-	logger             *slog.Logger
+	location       *time.Location
+	maxSLIKUpload  int64
+	lpsDefaultCode string
+	appendAudit    func(context.Context, audit.Event) error
+	logger         *slog.Logger
 }
 
 func registerFeatureRoutes(router chi.Router, dependencies featureDependencies) {
@@ -83,7 +83,7 @@ func registerFeatureRoutes(router chi.Router, dependencies featureDependencies) 
 	impersonation.NewHandler(dependencies.admin, impersonationService, dependencies.cookies).RegisterRoutes(router)
 	auditlogs.NewHandler(dependencies.admin, auditLogService).RegisterRoutes(router)
 	loaninquiry.NewHandler(dependencies.admin, dependencies.positions, dependencies.location, dependencies.appendAudit, dependencies.logger).RegisterRoutes(router)
-	featurereporting.NewHandler(dependencies.admin, dependencies.reporting, dependencies.location, dependencies.maxReportingUpload).RegisterRoutes(router)
+	featureslik.NewHandler(dependencies.admin, dependencies.slik, dependencies.location, dependencies.maxSLIKUpload).RegisterRoutes(router)
 	featurelps.NewHandler(dependencies.admin, dependencies.lps, dependencies.lpsDefaultCode, dependencies.location, dependencies.appendAudit, dependencies.logger).RegisterRoutes(router)
 	snapshots.NewHandler(dependencies.admin, dependencies.snapshot).RegisterRoutes(router)
 }
@@ -91,7 +91,7 @@ func registerFeatureRoutes(router chi.Router, dependencies featureDependencies) 
 func navigationGroups() []navigation.Group {
 	return []navigation.Group{
 		{Key: "general", Label: "General", Items: []navigation.Item{dashboard.Navigation(), loaninquiry.Navigation()}},
-		{Key: "reporting", Label: "Reporting", Items: []navigation.Item{featurereporting.Navigation(), featurelps.Navigation()}},
+		{Key: "reporting", Label: "Reporting", Items: []navigation.Item{featureslik.Navigation(), featurelps.Navigation()}},
 		{Key: "management", Label: "Management", Items: []navigation.Item{
 			users.Navigation(),
 			{Key: "access-control", Label: "Access Control", Icon: "shield", Children: []navigation.Item{roles.Navigation()}},

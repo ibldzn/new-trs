@@ -19,9 +19,13 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/trs ./c
 FROM alpine:3.23
 RUN apk add --no-cache ca-certificates \
     && addgroup -S app \
-    && adduser -S -G app app
+    && adduser -S -G app app \
+    && mkdir -p /app/data/slik \
+    && chown -R app:app /app
 COPY --from=backend /out/trs /usr/local/bin/trs
 ENV APP_ENV=production
+ENV SLIK_STORAGE_DIR=/app/data/slik
+WORKDIR /app
 USER app
 EXPOSE 8080
 ENTRYPOINT ["trs"]
