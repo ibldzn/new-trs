@@ -75,9 +75,6 @@ func (calculator Calculator) Calculate(input loan.CalculationInput) (loan.Calcul
 
 	for _, payment := range repayments {
 		amount := payment.PrincipalComponent.Add(payment.InterestComponent)
-		if amount.Cmp(payment.TotalPayment) > 0 {
-			return loan.CalculationResult{}, fmt.Errorf("%w: repayment principal and interest exceed total payment on %s", loan.ErrHistoricalEvidence, payment.Date)
-		}
 		accrueThrough(payment.Date)
 		collectability, err := collectabilityAt(input.Opening.CollectabilityBI, timeline, payment.Date)
 		if err != nil {
@@ -116,26 +113,47 @@ func effectiveRepayments(source []loan.Repayment, cutoff, asOf loan.Date) ([]loa
 	effective := repayments[:0]
 	for index := 0; index < len(repayments); index++ {
 		payment := repayments[index]
-		if repaymentHasNegative(payment) {
+		if payment.TotalPayment.IsNegative() {
 			return nil, fmt.Errorf("%w on %s (source order %d)", loan.ErrUnsupportedRepaymentReversal, payment.Date, payment.SourceOrder)
 		}
-		if index+1 < len(repayments) && repaymentHasNegative(repayments[index+1]) {
-			next := repayments[index+1]
-			if payment.TotalPayment.IsPositive() && payment.Date.Equal(next.Date) && exactRepaymentInverse(payment, next) {
-				index++
-				continue
+		if payment.TotalPayment.IsZero() {
+			if !zeroRepaymentComponents(payment) {
+				return nil, fmt.Errorf("%w on %s (source order %d)", loan.ErrUnsupportedRepaymentAdjustment, payment.Date, payment.SourceOrder)
 			}
-			return nil, fmt.Errorf("%w on %s (source order %d)", loan.ErrUnsupportedRepaymentReversal, next.Date, next.SourceOrder)
+			continue
+		}
+		reversalCandidate := index+1 < len(repayments) && repayments[index+1].TotalPayment.IsNegative()
+		if reversalCandidate {
+			next := repayments[index+1]
+			if !payment.Date.Equal(next.Date) || !exactRepaymentInverse(payment, next) {
+				return nil, fmt.Errorf("%w on %s (source order %d)", loan.ErrUnsupportedRepaymentReversal, next.Date, next.SourceOrder)
+			}
+		}
+		if !repaymentComponentsEqualTotal(payment) {
+			return nil, fmt.Errorf("%w: repayment components do not equal total payment on %s", loan.ErrHistoricalEvidence, payment.Date)
+		}
+		if reversalCandidate {
+			index++
+			continue
+		}
+		amount := payment.PrincipalComponent.Add(payment.InterestComponent)
+		if amount.IsNegative() {
+			return nil, fmt.Errorf("%w: positive repayment has negative allocable amount on %s", loan.ErrUnsupportedCalculation, payment.Date)
 		}
 		effective = append(effective, payment)
 	}
 	return effective, nil
 }
 
-func repaymentHasNegative(payment loan.Repayment) bool {
-	return payment.PrincipalComponent.IsNegative() || payment.InterestComponent.IsNegative() ||
-		payment.PenaltyComponent.IsNegative() || payment.EarlyPenaltyComponent.IsNegative() ||
-		payment.DWPComponent.IsNegative() || payment.TotalPayment.IsNegative()
+func zeroRepaymentComponents(payment loan.Repayment) bool {
+	return payment.PrincipalComponent.IsZero() && payment.InterestComponent.IsZero() &&
+		payment.PenaltyComponent.IsZero() && payment.EarlyPenaltyComponent.IsZero() && payment.DWPComponent.IsZero()
+}
+
+func repaymentComponentsEqualTotal(payment loan.Repayment) bool {
+	return payment.PrincipalComponent.Add(payment.InterestComponent).
+		Add(payment.PenaltyComponent).Add(payment.EarlyPenaltyComponent).Add(payment.DWPComponent).
+		Cmp(payment.TotalPayment) == 0
 }
 
 func exactRepaymentInverse(positive, negative loan.Repayment) bool {

@@ -695,6 +695,29 @@ func TestSLIKClosedLoanAndReversalResults(t *testing.T) {
 			t.Fatalf("job=%+v values=%+v", job, value)
 		}
 	})
+	t.Run("mixed-sign positive repayment completes", func(t *testing.T) {
+		store := newMemoryStore()
+		mixed := loan.Repayment{Date: date, PrincipalComponent: loan.MustMoney("336501"), InterestComponent: loan.MustMoney("-4001"), TotalPayment: loan.MustMoney("332500")}
+		manager := testManager(t, store, syntheticReversalPositions([]loan.Repayment{mixed}), 1, t.TempDir())
+		job := submitWorkbook(t, manager, accountsWorkbook(t, []string{"A"}))
+		job = waitJobStatus(t, manager, job.ID, "COMPLETED")
+		store.mu.Lock()
+		value := store.accounts[job.ID]["A"]
+		store.mu.Unlock()
+		if value.Balance != "0.00" || value.Rate != "18" {
+			t.Fatalf("job=%+v values=%+v", job, value)
+		}
+	})
+	t.Run("zero-net adjustment fails safely", func(t *testing.T) {
+		store := newMemoryStore()
+		adjustment := loan.Repayment{Date: date, PrincipalComponent: loan.MustMoney("100"), InterestComponent: loan.MustMoney("-100")}
+		manager := testManager(t, store, syntheticReversalPositions([]loan.Repayment{adjustment}), 1, t.TempDir())
+		job := submitWorkbook(t, manager, accountsWorkbook(t, []string{"A"}))
+		job = waitJobStatus(t, manager, job.ID, "FAILED")
+		if job.FailedAccount != "A" || job.FailureReason != "unsupported zero-net repayment adjustment" || job.OutputFile != "" {
+			t.Fatalf("job=%+v", job)
+		}
+	})
 	t.Run("unsupported reversal fails fast", func(t *testing.T) {
 		store := newMemoryStore()
 		var callsMu sync.Mutex

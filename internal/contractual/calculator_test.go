@@ -102,28 +102,34 @@ func TestCalculatorContractualBehavior(t *testing.T) {
 		}, want: [4]string{"0.00", "0.00", "0.00", "288.00"}, wantKolek: 1, wantPeriods: 1, wantPayments: 1},
 		{name: "penalty and DWP excluded", change: func(input *loan.CalculationInput) {
 			input.AsOf = date("2025-11-12")
-			row := payment("2025-11-12", "100", "12", "999")
+			row := payment("2025-11-12", "100", "12", "912")
 			row.PenaltyComponent = money("500")
 			row.DWPComponent = money("300")
 			input.Repayments = []loan.Repayment{row}
 		}, want: [4]string{"100.00", "0.00", "0.00", "0.00"}, wantKolek: 1, wantPeriods: 1, wantPayments: 1},
-		{name: "negative principal reversal rejected", change: func(input *loan.CalculationInput) {
+		{name: "unmatched negative total rejected", change: func(input *loan.CalculationInput) {
 			input.AsOf = date("2025-11-01")
 			input.Repayments = []loan.Repayment{payment("2025-11-01", "-1", "0", "-1")}
-		}, wantError: loan.ErrUnsupportedCalculation},
+		}, wantError: loan.ErrUnsupportedRepaymentReversal},
 		{name: "negative total reversal rejected", change: func(input *loan.CalculationInput) {
 			input.AsOf = date("2025-11-01")
 			input.Repayments = []loan.Repayment{payment("2025-11-01", "0", "0", "-1")}
-		}, wantError: loan.ErrUnsupportedCalculation},
-		{name: "negative excluded component still signals reversal", change: func(input *loan.CalculationInput) {
+		}, wantError: loan.ErrUnsupportedRepaymentReversal},
+		{name: "zero total nonzero excluded component rejected", change: func(input *loan.CalculationInput) {
 			input.AsOf = date("2025-11-01")
 			row := payment("2025-11-01", "0", "0", "0")
 			row.DWPComponent = money("-1")
 			input.Repayments = []loan.Repayment{row}
-		}, wantError: loan.ErrUnsupportedCalculation},
+		}, wantError: loan.ErrUnsupportedRepaymentAdjustment},
 		{name: "zero allocable payment skipped", change: func(input *loan.CalculationInput) {
 			input.AsOf = date("2025-11-01")
-			input.Repayments = []loan.Repayment{payment("2025-11-01", "0", "0", "200")}
+			row := payment("2025-11-01", "0", "0", "200")
+			row.PenaltyComponent = money("200")
+			input.Repayments = []loan.Repayment{row}
+		}, want: [4]string{"200.00", "0.00", "0.00", "0.00"}, wantKolek: 1},
+		{name: "all-zero repayment skipped", change: func(input *loan.CalculationInput) {
+			input.AsOf = date("2025-11-01")
+			input.Repayments = []loan.Repayment{payment("2025-11-01", "0", "0", "0")}
 		}, want: [4]string{"200.00", "0.00", "0.00", "0.00"}, wantKolek: 1},
 		{name: "no payment accrues through as-of", change: func(input *loan.CalculationInput) { input.AsOf = date("2025-12-31") }, want: [4]string{"200.00", "200.00", "24.00", "0.00"}, wantKolek: 1, wantPeriods: 2},
 		{name: "final contractual installment", change: func(input *loan.CalculationInput) {
@@ -204,21 +210,28 @@ func TestCalculatorRejectsInvalidEvidence(t *testing.T) {
 	}
 }
 
-func TestCalculatorValidatesRepaymentComponentsAgainstTotal(t *testing.T) {
+func TestCalculatorValidatesCompleteRepaymentIdentity(t *testing.T) {
 	for _, test := range []struct {
-		name                   string
-		principal, interest    string
-		total                  string
-		wantHistoricalEvidence bool
+		name                         string
+		principal, interest, penalty string
+		total                        string
+		wantHistoricalEvidence       bool
 	}{
-		{name: "components below total", principal: "90", interest: "20", total: "120"},
+		{name: "components below total", principal: "90", interest: "20", total: "120", wantHistoricalEvidence: true},
 		{name: "components equal total", principal: "90", interest: "20", total: "110"},
 		{name: "components exceed total", principal: "900000", interest: "300000", total: "1000000", wantHistoricalEvidence: true},
+		{name: "signed excluded component", principal: "100", interest: "0", penalty: "-10", total: "90"},
+		{name: "negative interest positive total", principal: "336501", interest: "-4001", total: "332500"},
+		{name: "excluded component mismatch", principal: "100", interest: "0", penalty: "20", total: "110", wantHistoricalEvidence: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			input := baseInput()
 			input.AsOf = date("2025-11-01")
-			input.Repayments = []loan.Repayment{payment("2025-11-01", test.principal, test.interest, test.total)}
+			row := payment("2025-11-01", test.principal, test.interest, test.total)
+			if test.penalty != "" {
+				row.PenaltyComponent = money(test.penalty)
+			}
+			input.Repayments = []loan.Repayment{row}
 			_, err := (Calculator{}).Calculate(input)
 			if errors.Is(err, loan.ErrHistoricalEvidence) != test.wantHistoricalEvidence {
 				t.Fatalf("error = %v", err)

@@ -32,6 +32,80 @@ func TestExactAdjacentReversalCancelsBeforeAllocation(t *testing.T) {
 	}
 }
 
+func TestMixedSignPositiveRepaymentUsesNetAllocation(t *testing.T) {
+	for _, collectability := range []int{1, 2, 3, 4, 5} {
+		asOf := date("2026-08-26")
+		row := payment("2026-08-26", "336501", "-4001", "332500")
+		input := loan.CalculationInput{
+			AsOf: asOf, Cutoff: date("2025-10-12"), ContractualPrincipal: money("1000000"),
+			TenorMonths: 1, FlatRatePercent: money("18"),
+			Opening: loan.OpeningLoanState{PrincipalOutstanding: money("1000000"), PrincipalDue: money("400000"),
+				InterestDue: money("400000"), CollectabilityBI: 1},
+			CollectabilityTimeline: []loan.CollectabilityPoint{{Date: date("2026-08-20"), Value: collectability}},
+			ContractSchedule:       []loan.ContractualInstallment{{Number: 1, DueDate: date("2026-09-01")}},
+			Repayments:             []loan.Repayment{row},
+		}
+		got, err := (Calculator{}).Calculate(input)
+		if err != nil {
+			t.Fatalf("collectability=%d: %v", collectability, err)
+		}
+		want := [3]string{"1000000.00", "400000.00", "67500.00"}
+		if collectability >= 3 {
+			want = [3]string{"667500.00", "67500.00", "400000.00"}
+		}
+		balances := [3]string{got.PrincipalOutstanding.Format(2), got.PrincipalDue.Format(2), got.InterestDue.Format(2)}
+		if balances != want || got.Trace.RepaymentsApplied != 1 || !got.Trace.LastPaymentDate.Equal(asOf) || got.CollectabilityBI != collectability {
+			t.Fatalf("collectability=%d balances=%v trace=%+v", collectability, balances, got.Trace)
+		}
+	}
+}
+
+func TestMixedSignPositiveExactInverseCancels(t *testing.T) {
+	input := baseInput()
+	input.AsOf = date("2025-11-12")
+	withoutPair, err := (Calculator{}).Calculate(input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	positive := payment("2025-11-12", "336501", "-4001", "332500")
+	positive.JournalNumber, positive.SourceOrder = "original", 0
+	negative := payment("2025-11-12", "-336501", "4001", "-332500")
+	negative.JournalNumber, negative.SourceOrder = "different journal", 1
+	input.Repayments = []loan.Repayment{positive, negative}
+	original := append([]loan.Repayment(nil), input.Repayments...)
+	withPair, err := (Calculator{}).Calculate(input)
+	if err != nil || !reflect.DeepEqual(withPair, withoutPair) || !reflect.DeepEqual(input.Repayments, original) || withPair.Trace.RepaymentsApplied != 0 {
+		t.Fatalf("result=%+v baseline=%+v repayments=%+v error=%v", withPair, withoutPair, input.Repayments, err)
+	}
+}
+
+func TestZeroNetAdjustmentAndNegativeAllocable(t *testing.T) {
+	for _, test := range []struct {
+		name string
+		row  loan.Repayment
+		want error
+	}{
+		{"zero-net components", payment("2025-11-12", "100", "-100", "0"), loan.ErrUnsupportedRepaymentAdjustment},
+		{"negative allocable despite positive total", func() loan.Repayment {
+			row := payment("2025-11-12", "-200", "50", "100")
+			row.PenaltyComponent = money("250")
+			return row
+		}(), loan.ErrUnsupportedCalculation},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			input := baseInput()
+			input.AsOf = date("2025-11-12")
+			input.Repayments = []loan.Repayment{test.row}
+			_, err := (Calculator{}).Calculate(input)
+			if !errors.Is(err, test.want) || errors.Is(err, loan.ErrUnsupportedRepaymentReversal) ||
+				(test.want == loan.ErrUnsupportedCalculation && errors.Is(err, loan.ErrUnsupportedRepaymentAdjustment)) ||
+				(test.want == loan.ErrUnsupportedRepaymentAdjustment && !errors.Is(err, loan.ErrUnsupportedCalculation)) {
+				t.Fatalf("error=%v", err)
+			}
+		})
+	}
+}
+
 func TestObservedPatternLeavesOnlyPositiveInterestRows(t *testing.T) {
 	input := baseInput()
 	input.AsOf = date("2025-11-12")
@@ -70,7 +144,6 @@ func TestUnsupportedRepaymentReversals(t *testing.T) {
 		{"non-adjacent inverse", []loan.Repayment{positive, payment("2025-11-12", "100000", "0", "100000"), negative}},
 		{"negative total mismatch", []loan.Repayment{positive, payment("2025-11-12", "-300000", "0", "-200000")}},
 		{"mixed signs", []loan.Repayment{positive, payment("2025-11-12", "-300000", "1", "-299999")}},
-		{"previous total not positive", []loan.Repayment{payment("2025-11-12", "300000", "0", "0"), payment("2025-11-12", "-300000", "0", "0")}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			input := baseInput()
@@ -117,6 +190,13 @@ func TestReversalComparesEveryMonetaryComponentExactly(t *testing.T) {
 			}
 		})
 	}
+	positive.TotalPayment = money("14")
+	negative.TotalPayment = money("-14")
+	input.Repayments = []loan.Repayment{positive, negative}
+	_, err = (Calculator{}).Calculate(input)
+	if !errors.Is(err, loan.ErrHistoricalEvidence) {
+		t.Fatalf("exact inverse with inconsistent components: error=%v", err)
+	}
 }
 
 func TestReversalValidationUsesWindowAndSourceOrder(t *testing.T) {
@@ -130,7 +210,9 @@ func TestReversalValidationUsesWindowAndSourceOrder(t *testing.T) {
 	}
 	input.Repayments = []loan.Repayment{
 		payment("2026-09-01", "-300000", "0", "-300000"),
+		payment("2026-09-01", "100", "-100", "0"),
 		payment("2025-10-12", "-300000", "0", "-300000"),
+		payment("2025-10-12", "100", "-100", "0"),
 		effective,
 	}
 	got, err := (Calculator{}).Calculate(input)

@@ -610,6 +610,8 @@ func safeFailure(err error) string {
 		return "upstream timeout"
 	case errors.Is(err, loan.ErrUnsupportedRepaymentReversal):
 		return "unsupported repayment reversal"
+	case errors.Is(err, loan.ErrUnsupportedRepaymentAdjustment):
+		return "unsupported zero-net repayment adjustment"
 	case errors.Is(err, loan.ErrUnsupportedCalculation):
 		return "unsupported calculation"
 	case errors.Is(err, loan.ErrInvalidInput):
