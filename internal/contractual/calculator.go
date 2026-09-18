@@ -75,7 +75,7 @@ func (calculator Calculator) Calculate(input loan.CalculationInput) (loan.Calcul
 		if !payment.Date.After(input.Cutoff) || payment.Date.After(input.AsOf) {
 			continue
 		}
-		if payment.Date.IsZero() || payment.PrincipalComponent.IsNegative() || payment.InterestComponent.IsNegative() || payment.PenaltyComponent.IsNegative() || payment.EarlyPenaltyComponent.IsNegative() || payment.DWPComponent.IsNegative() || payment.TotalPayment.IsNegative() {
+		if payment.Date.IsZero() {
 			return loan.CalculationResult{}, fmt.Errorf("%w: negative or invalid repayment on %s", loan.ErrUnsupportedCalculation, payment.Date)
 		}
 		amount := payment.PrincipalComponent.Add(payment.InterestComponent)

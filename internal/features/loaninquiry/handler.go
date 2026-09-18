@@ -87,7 +87,7 @@ func (handler *Handler) Inquiry(writer http.ResponseWriter, request *http.Reques
 	resolved, err := handler.positions.GetLoanPosition(request.Context(), data.Account, asOf)
 	if err != nil {
 		status, message := inquiryError(err)
-		data.Error = message
+		data.Error = message + " " + err.Error()
 		handler.admin.RenderPage(writer, request, status, "features/loaninquiry/index", "Loan Inquiry", data)
 		return
 	}
