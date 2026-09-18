@@ -727,8 +727,9 @@ func Inspect(filename, originalName string) (Workbook, error) {
 			return nil
 		}
 		for _, value := range cells {
-			if (value.Column == selected.BalanceColumn || value.Column == selected.RateColumn) && (value.Formula || (value.Type != "" && value.Type != "n" && value.Type != "s" && value.Type != "str" && value.Type != "inlineStr")) {
-				return fmt.Errorf("row %d has an unsupported target cell", row)
+			if (value.Column == selected.BalanceColumn || value.Column == selected.RateColumn) &&
+				(value.Formula || (value.Type != "" && value.Type != "n" && value.Type != "s" && value.Type != "str" && value.Type != "inlineStr")) {
+				return fmt.Errorf("row %d has an unsupported target cell: %+v", row, value)
 			}
 		}
 		return nil
