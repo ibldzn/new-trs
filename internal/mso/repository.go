@@ -14,37 +14,30 @@ import (
 )
 
 type Repository struct {
-	database          *sqlx.DB
-	location          *time.Location
-	debtorTypeQuery   string
-	interestTypeQuery string
+	database *sqlx.DB
+	location *time.Location
 }
 
-func NewRepository(database *sqlx.DB, location *time.Location, interestTypeQuery, debtorTypeQuery string) *Repository {
-	return &Repository{
-		database: database, location: location, interestTypeQuery: strings.TrimSpace(interestTypeQuery), debtorTypeQuery: strings.TrimSpace(debtorTypeQuery),
-	}
+func NewRepository(database *sqlx.DB, location *time.Location) *Repository {
+	return &Repository{database: database, location: location}
 }
 
 func (repository *Repository) DebtorTypeByAlternateCIF(ctx context.Context, cif string) (string, error) {
-	if repository.debtorTypeQuery == "" {
-		return "", errors.Join(loan.ErrMSOUnavailable, fmt.Errorf("MSO_DEBTOR_TYPE_QUERY is not configured"))
-	}
-	if !validReadQuery(repository.debtorTypeQuery) {
-		return "", errors.Join(loan.ErrMSOUnavailable, fmt.Errorf("MSO_DEBTOR_TYPE_QUERY must be a SELECT with one placeholder"))
-	}
+	const query = `
+		SELECT
+			debitur_golongan2 AS debtor_type
+		FROM
+			data_nasabah_badan
+		WHERE
+			REPLACE(REPLACE(nasabah_master, '.', ''), '#', '') = ?`
 	var debtorType string
-	if err := repository.database.GetContext(ctx, &debtorType, repository.debtorTypeQuery, cif); err != nil {
+	if err := repository.database.GetContext(ctx, &debtorType, query, cif); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", loan.ErrNotFound
 		}
 		return "", errors.Join(loan.ErrMSOUnavailable, err)
 	}
 	return debtorType, nil
-}
-
-func validReadQuery(query string) bool {
-	return strings.HasPrefix(strings.ToUpper(strings.TrimSpace(query)), "SELECT ") && strings.Count(query, "?") == 1 && !strings.Contains(query, ";")
 }
 
 type stateRow struct {
@@ -71,14 +64,15 @@ func (repository *Repository) OpeningState(ctx context.Context, account string, 
 	if err != nil {
 		return loan.OpeningLoanState{}, err
 	}
-	if repository.interestTypeQuery == "" {
-		return loan.OpeningLoanState{}, errors.Join(loan.ErrMSOUnavailable, fmt.Errorf("MSO_INTEREST_TYPE_QUERY is not configured"))
-	}
-	if !validReadQuery(repository.interestTypeQuery) {
-		return loan.OpeningLoanState{}, errors.Join(loan.ErrMSOUnavailable, fmt.Errorf("MSO_INTEREST_TYPE_QUERY must be a SELECT with one placeholder"))
-	}
+	const query = `
+		SELECT
+			kre_sistem_bunga AS interest_type
+		FROM
+			data_kredit_master
+		WHERE
+			kre_rekening = ?`
 	var interestType string
-	if err := repository.database.GetContext(ctx, &interestType, repository.interestTypeQuery, strings.TrimSpace(account)); err != nil {
+	if err := repository.database.GetContext(ctx, &interestType, query, strings.TrimSpace(account)); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return loan.OpeningLoanState{}, errors.Join(loan.ErrNotFound, loan.ErrHistoricalEvidence)
 		}

@@ -156,7 +156,7 @@ func Run(ctx context.Context) error {
 	}
 	snapshotRepository := snapshot.NewRepository(databaseConnection, location)
 	snapshotService := snapshot.NewService(snapshot.NewSource(fincloudClient, location), snapshotRepository, location, appendAudit, logger)
-	msoRepository := mso.NewRepository(msoDatabase, location, applicationConfig.MSO.InterestTypeQuery, applicationConfig.MSO.DebtorTypeQuery)
+	msoRepository := mso.NewRepository(msoDatabase, location)
 	positionService, err := position.NewService(
 		fincloudClient, msoRepository, dwh.NewRepository(dwhDatabase, location),
 		snapshotRepository, contractual.Calculator{}, location,

@@ -2,6 +2,7 @@ package config
 
 import (
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -37,6 +38,22 @@ func TestParseAPIKey(t *testing.T) {
 	config, err := parse(mapLookup(baseValues("THOR_API_KEY", "example-secret")))
 	if err != nil || config.APIKey != "example-secret" {
 		t.Fatalf("API key was not loaded: %v", err)
+	}
+}
+
+func TestParseExternalDatabaseDSNs(t *testing.T) {
+	config, err := parse(mapLookup(map[string]string{
+		"DB_NAME": "go_admin", "DB_USER": "root", "DWH_DBSTRING": " dwh ", "MSO_DBSTRING": " mso ",
+	}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if config.DWH.DSN != "dwh" || config.MSO.DSN != "mso" {
+		t.Fatalf("external databases = DWH %+v, MSO %+v", config.DWH, config.MSO)
+	}
+	typeOf := reflect.TypeOf(ExternalDatabaseConfig{})
+	if typeOf.NumField() != 1 || typeOf.Field(0).Name != "DSN" {
+		t.Fatalf("external database fields = %v", typeOf)
 	}
 }
 

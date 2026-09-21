@@ -78,9 +78,7 @@ type SessionConfig struct {
 }
 
 type ExternalDatabaseConfig struct {
-	DSN               string
-	DebtorTypeQuery   string
-	InterestTypeQuery string
+	DSN string
 }
 
 type FincloudConfig struct {
@@ -206,10 +204,7 @@ func parse(lookup lookupEnv) (Config, error) {
 			Secure:           sessionSecure,
 		},
 		DWH: ExternalDatabaseConfig{DSN: strings.TrimSpace(value("DWH_DBSTRING", ""))},
-		MSO: ExternalDatabaseConfig{
-			DSN: strings.TrimSpace(value("MSO_DBSTRING", "")), DebtorTypeQuery: strings.TrimSpace(value("MSO_DEBTOR_TYPE_QUERY", "")),
-			InterestTypeQuery: strings.TrimSpace(value("MSO_INTEREST_TYPE_QUERY", "")),
-		},
+		MSO: ExternalDatabaseConfig{DSN: strings.TrimSpace(value("MSO_DBSTRING", ""))},
 		Fincloud: FincloudConfig{
 			BaseURL: strings.TrimSpace(value("FINCLOUD_BASE_URL", "")), Username: strings.TrimSpace(value("FINCLOUD_SYSTEM_USERNAME", "")),
 			Password: value("FINCLOUD_SYSTEM_PASSWORD", ""), LocationID: strings.TrimSpace(value("FINCLOUD_SYSTEM_LOCATION_ID", "")),

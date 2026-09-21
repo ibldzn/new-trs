@@ -34,7 +34,7 @@ make dev
 
 Set application DB, read-only DWH/MSO DSNs, and Fincloud system credentials in `.env`. Never commit secrets.
 
-`MSO_INTEREST_TYPE_QUERY` and `MSO_DEBTOR_TYPE_QUERY` must be read-only `SELECT` statements with one `?` placeholder. Related operations fail clearly when either query is required but absent.
+`MSO_DBSTRING` is the only MSO runtime configuration. The application owns fixed legacy schema queries: debtor type uses `data_nasabah_badan.nasabah_master` and `debitur_golongan2`; interest type uses `data_kredit_master.kre_rekening` and `kre_sistem_bunga`.
 
 ## Internal loan API
 
@@ -88,8 +88,6 @@ Production binary: `bin/trs`.
 ## Unresolved production validation
 
 - Confirm actual DWH column names documented in `ETF_REWRITE_TECHNICAL_REQUIREMENTS.md`.
-- Confirm MSO loan-master table/key used for `kre_sistem_bunga`.
-- Supply `MSO_DEBTOR_TYPE_QUERY` from approved MSO schema.
 - Validate contractual installment rounding against MSO. Calculator currently keeps exact rational values behind one rounding hook.
 - Replace provisional numeric LPS debtor/DATI2 validation with authoritative exhaustive code sets.
 - Confirm official LPS `ListHarian` request/response field names against reachable production service.
