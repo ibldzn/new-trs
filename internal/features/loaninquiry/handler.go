@@ -56,7 +56,6 @@ type ResultView struct {
 	FlatRate                 string
 	Collectability           string
 	EarlyTerminationEstimate string
-	EarlyTerminationNote     string
 	IsReconstructed          bool
 	PrintURL                 string
 	ScheduleRows             []ScheduleRowView
@@ -195,9 +194,8 @@ func newResultView(resolved loan.ResolvedPosition, requestedAccount string, asOf
 		PenaltyDue: formatCurrency(resolved.ActualPosition.PenaltyDue), ContractPrincipal: formatCurrency(resolved.Loan.PlafondLimit),
 		ReferenceRate: formatRate(resolved.Loan.ReferenceRatePercent), FlatRate: formatRate(resolved.Loan.FlatRatePercent),
 		Collectability: fmt.Sprint(resolved.Position.CollectabilityBI), EarlyTerminationEstimate: formatCurrency(early),
-		EarlyTerminationNote: "6 contractual installments",
-		IsReconstructed:      resolved.Position.Source == loan.SourceReconstructed,
-		PrintURL:             "/loans/inquiry/pdf?" + query.Encode(), ScheduleRows: schedule,
+		IsReconstructed: resolved.Position.Source == loan.SourceReconstructed,
+		PrintURL:        "/loans/inquiry/pdf?" + query.Encode(), ScheduleRows: schedule,
 	}, nil
 }
 
