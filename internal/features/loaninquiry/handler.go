@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -37,8 +38,15 @@ type PageData struct {
 }
 
 type ResultView struct {
-	Loan                     loan.ContractData
-	Position                 loan.LoanPosition
+	ReportingDate            string
+	PeriodLabel              string
+	CustomerName             string
+	PrimaryAccount           string
+	AlternateAccount         string
+	Branch                   string
+	Product                  string
+	LoanPeriod               string
+	InstallmentSummary       string
 	PrincipalOutstanding     string
 	PrincipalDue             string
 	InterestDue              string
@@ -46,20 +54,22 @@ type ResultView struct {
 	ContractPrincipal        string
 	ReferenceRate            string
 	FlatRate                 string
-	PeriodicPrincipal        string
-	PeriodicInterest         string
+	Collectability           string
 	EarlyTerminationEstimate string
-	DueDateCount             int
-	ContractualSchedule      []ScheduleRowView
+	EarlyTerminationNote     string
+	IsReconstructed          bool
+	PrintURL                 string
+	ScheduleRows             []ScheduleRowView
 }
 
 type ScheduleRowView struct {
-	Number           int
-	DueDate          string
-	Principal        string
-	Interest         string
-	Installment      string
-	ScheduledBalance string
+	Number      int
+	Date        string
+	Installment string
+	Principal   string
+	Interest    string
+	Outstanding string
+	Status      string
 }
 
 func NewHandler(admin *adminshell.Shell, positions positionService, location *time.Location, appendAudit func(context.Context, audit.Event) error, logger *slog.Logger) *Handler {
@@ -84,20 +94,29 @@ func (handler *Handler) Inquiry(writer http.ResponseWriter, request *http.Reques
 		handler.admin.RenderPage(writer, request, http.StatusUnprocessableEntity, "features/loaninquiry/index", "Loan Inquiry", data)
 		return
 	}
-	resolved, err := handler.positions.GetLoanPosition(request.Context(), data.Account, asOf)
+	resolved, view, err := handler.resolveResult(request.Context(), data.Account, asOf)
 	if err != nil {
 		status, message := inquiryError(err)
 		data.Error = message + " " + err.Error()
 		handler.admin.RenderPage(writer, request, status, "features/loaninquiry/index", "Loan Inquiry", data)
 		return
 	}
-	view, err := newResultView(resolved)
-	if err != nil {
-		handler.admin.Internal(writer, request, "prepare loan inquiry", err)
-		return
-	}
 	data.Result = &view
-	principal, ok := browserauth.CurrentPrincipal(request.Context())
+	handler.auditInquiry(request.Context(), resolved, asOf)
+	handler.admin.RenderPage(writer, request, http.StatusOK, "features/loaninquiry/index", "Loan Inquiry", data)
+}
+
+func (handler *Handler) resolveResult(ctx context.Context, account string, asOf loan.Date) (loan.ResolvedPosition, ResultView, error) {
+	resolved, err := handler.positions.GetLoanPosition(ctx, account, asOf)
+	if err != nil {
+		return loan.ResolvedPosition{}, ResultView{}, err
+	}
+	view, err := newResultView(resolved, account, asOf)
+	return resolved, view, err
+}
+
+func (handler *Handler) auditInquiry(ctx context.Context, resolved loan.ResolvedPosition, asOf loan.Date) {
+	principal, ok := browserauth.CurrentPrincipal(ctx)
 	if ok && handler.appendAudit != nil {
 		actor := audit.Identity{UserID: principal.Actor.UserID, Username: principal.Actor.Username}
 		effective := audit.Identity{UserID: principal.UserID, Username: principal.Username}
@@ -105,14 +124,13 @@ func (handler *Handler) Inquiry(writer http.ResponseWriter, request *http.Reques
 			Attribution: audit.Attribution{Actor: &actor, Effective: &effective}, Action: audit.ActionLoanInquiry,
 			Metadata: audit.LoanInquiryMetadata{AccountNumber: resolved.Position.AccountNumber, AsOf: asOf.String(), Source: string(resolved.Position.Source)}, CreatedAt: time.Now().UTC(),
 		}
-		if err := handler.appendAudit(request.Context(), event); err != nil && handler.logger != nil {
-			handler.logger.WarnContext(request.Context(), "append loan inquiry audit", "error", err)
+		if err := handler.appendAudit(ctx, event); err != nil && handler.logger != nil {
+			handler.logger.WarnContext(ctx, "append loan inquiry audit", "error", err)
 		}
 	}
-	handler.admin.RenderPage(writer, request, http.StatusOK, "features/loaninquiry/index", "Loan Inquiry", data)
 }
 
-func newResultView(resolved loan.ResolvedPosition) (ResultView, error) {
+func newResultView(resolved loan.ResolvedPosition, requestedAccount string, asOf loan.Date) (ResultView, error) {
 	var principalPerPeriod, interestPerPeriod loan.Money
 	if resolved.Position.Source == loan.SourceReconstructed {
 		if len(resolved.ContractualSchedule) == 0 {
@@ -133,24 +151,107 @@ func newResultView(resolved loan.ResolvedPosition) (ResultView, error) {
 		}
 	}
 	early := principalPerPeriod.Add(interestPerPeriod).Mul(loan.MoneyFromInt(6))
-	schedule := make([]ScheduleRowView, 0, len(resolved.ContractualSchedule))
+	schedule := make([]ScheduleRowView, 0, len(resolved.ContractualSchedule)+1)
+	if !resolved.Position.LoanStartDate.IsZero() {
+		schedule = append(schedule, ScheduleRowView{
+			Number: 0, Date: formatDate(resolved.Position.LoanStartDate), Installment: formatCurrency(loan.Money{}),
+			Principal: formatCurrency(loan.Money{}), Interest: formatCurrency(loan.Money{}),
+			Outstanding: formatCurrency(resolved.Loan.PlafondLimit), Status: "DISBURSED",
+		})
+	}
 	if resolved.Position.Source == loan.SourceReconstructed {
 		for _, row := range resolved.ContractualSchedule {
 			schedule = append(schedule, ScheduleRowView{
-				Number: row.Number, DueDate: row.DueDate.Time(time.UTC).Format("02/01/2006"),
-				Principal: row.Principal.Format(2), Interest: row.Interest.Format(2), Installment: row.Installment.Format(2), ScheduledBalance: row.ScheduledBalance.Format(2),
+				Number: row.Number, Date: formatDate(row.DueDate), Principal: formatCurrency(row.Principal),
+				Interest: formatCurrency(row.Interest), Installment: formatCurrency(row.Installment),
+				Outstanding: formatCurrency(row.ScheduledBalance), Status: "-",
 			})
 		}
 	}
+	dueDates := contractualDueDates(resolved)
+	installmentSummary := "-"
+	if len(dueDates) > 0 {
+		current := 0
+		for _, dueDate := range dueDates {
+			if !dueDate.After(asOf) {
+				current++
+			}
+		}
+		installmentSummary = fmt.Sprintf("%d dari %d", current, len(dueDates))
+	}
+	loanPeriod := "-"
+	if !resolved.Position.LoanStartDate.IsZero() && len(dueDates) > 0 && resolved.Loan.TenorMonths > 0 {
+		loanPeriod = fmt.Sprintf("%s | %d bln | %s", formatDate(resolved.Position.LoanStartDate), resolved.Loan.TenorMonths, formatDate(dueDates[len(dueDates)-1]))
+	}
+	query := url.Values{"account": {requestedAccount}, "as_of": {asOf.String()}}
 	return ResultView{
-		Loan: resolved.Loan, Position: resolved.Position, PrincipalOutstanding: resolved.Position.PrincipalOutstanding.Format(2),
-		PrincipalDue: resolved.Position.PrincipalDue.Format(2), InterestDue: resolved.Position.InterestDue.Format(2),
-		PenaltyDue:        resolved.Loan.PenaltyDue.Format(2),
-		ContractPrincipal: resolved.Loan.PlafondLimit.Format(2), ReferenceRate: resolved.Loan.ReferenceRatePercent.Format(2),
-		FlatRate: resolved.Loan.FlatRatePercent.Format(2), PeriodicPrincipal: principalPerPeriod.Format(2),
-		PeriodicInterest: interestPerPeriod.Format(2), EarlyTerminationEstimate: early.Format(2),
-		DueDateCount: len(resolved.Loan.ContractSchedule), ContractualSchedule: schedule,
+		ReportingDate: asOf.String(), PeriodLabel: "Periode " + formatDate(asOf),
+		CustomerName:     displayText(resolved.Loan.CustomerName),
+		PrimaryAccount:   displayText(firstNonEmpty(resolved.Loan.PrimaryAccount, resolved.Position.AccountNumber)),
+		AlternateAccount: displayText(resolved.Loan.AlternateAccount), Branch: displayText(firstNonEmpty(resolved.Loan.Branch, resolved.Position.Branch)),
+		Product: displayText(firstNonEmpty(resolved.Loan.Product, resolved.Position.Product)), LoanPeriod: loanPeriod,
+		InstallmentSummary: installmentSummary, PrincipalOutstanding: formatCurrency(resolved.Position.PrincipalOutstanding),
+		PrincipalDue: formatCurrency(resolved.Position.PrincipalDue), InterestDue: formatCurrency(resolved.Position.InterestDue),
+		PenaltyDue: formatCurrency(resolved.Loan.PenaltyDue), ContractPrincipal: formatCurrency(resolved.Loan.PlafondLimit),
+		ReferenceRate: formatRate(resolved.Loan.ReferenceRatePercent), FlatRate: formatRate(resolved.Loan.FlatRatePercent),
+		Collectability: fmt.Sprint(resolved.Position.CollectabilityBI), EarlyTerminationEstimate: formatCurrency(early),
+		EarlyTerminationNote: "6 contractual installments",
+		IsReconstructed:      resolved.Position.Source == loan.SourceReconstructed,
+		PrintURL:             "/loans/inquiry/pdf?" + query.Encode(), ScheduleRows: schedule,
 	}, nil
+}
+
+func contractualDueDates(resolved loan.ResolvedPosition) []loan.Date {
+	if len(resolved.ContractualSchedule) > 0 {
+		dates := make([]loan.Date, len(resolved.ContractualSchedule))
+		for index, row := range resolved.ContractualSchedule {
+			dates[index] = row.DueDate
+		}
+		return dates
+	}
+	dates := make([]loan.Date, len(resolved.Loan.ContractSchedule))
+	for index, row := range resolved.Loan.ContractSchedule {
+		dates[index] = row.DueDate
+	}
+	return dates
+}
+
+func formatDate(date loan.Date) string {
+	if date.IsZero() {
+		return "-"
+	}
+	return date.Time(time.UTC).Format("02 Jan 2006")
+}
+
+func formatCurrency(value loan.Money) string {
+	raw := value.Format(2)
+	integer, decimal, _ := strings.Cut(raw, ".")
+	sign := ""
+	if strings.HasPrefix(integer, "-") {
+		sign, integer = "-", strings.TrimPrefix(integer, "-")
+	}
+	for index := len(integer) - 3; index > 0; index -= 3 {
+		integer = integer[:index] + "," + integer[index:]
+	}
+	return "Rp " + sign + integer + "." + decimal
+}
+
+func formatRate(value loan.Money) string { return value.Format(2) + "%" }
+
+func displayText(value string) string {
+	if value = strings.TrimSpace(value); value != "" {
+		return value
+	}
+	return "-"
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if strings.TrimSpace(value) != "" {
+			return value
+		}
+	}
+	return ""
 }
 
 func inquiryError(err error) (int, string) {

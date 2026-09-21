@@ -1,42 +1,87 @@
 {{/* Loan inquiry feature */}}{{define "content"}}
-<section class="space-y-6">
-    <div>
+<section class="min-w-0 space-y-6">
+    <header>
         <p class="text-sm font-medium text-emerald-600 dark:text-emerald-400">Loans</p>
-        <h1 class="mt-1 text-3xl font-bold tracking-tight">Contractual loan inquiry</h1>
-        <p class="mt-2 text-slate-600 dark:text-slate-400">Primary or alternate account number. Historical dates never use current Fincloud balances.</p>
-    </div>
+        <h1 class="mt-1 text-3xl font-bold tracking-tight">Loan Inquiry</h1>
+        <p class="mt-2 text-slate-600 dark:text-slate-400">Review contractual loan information by primary or alternate account at a selected reporting date.</p>
+    </header>
+
     <form method="post" action="/loans/inquiry" class="grid gap-4 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:grid-cols-[1fr_12rem_auto] sm:items-end dark:border-slate-800 dark:bg-slate-900">
-        <label class="block text-sm font-medium">Account number
+        <label class="block text-sm font-medium">Account Number
             <input name="account_number" value="{{.Data.Account}}" required maxlength="191" autocomplete="off" class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 dark:border-slate-700 dark:bg-slate-950">
         </label>
-        <label class="block text-sm font-medium">Reporting date
+        <label class="block text-sm font-medium">Reporting Date
             <input type="date" name="as_of" value="{{.Data.AsOf}}" required class="mt-1 w-full rounded-lg border border-slate-300 bg-white px-3 py-2.5 dark:border-slate-700 dark:bg-slate-950">
         </label>
-        <button class="rounded-lg bg-emerald-500 px-4 py-2.5 font-semibold text-slate-950 hover:bg-emerald-400">Calculate</button>
+        <button class="rounded-lg bg-emerald-500 px-4 py-2.5 font-semibold text-slate-950 hover:bg-emerald-400">Search / Calculate</button>
     </form>
+
     {{if .Data.Error}}<div role="alert" class="rounded-xl border border-red-300 bg-red-50 p-4 text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-200">{{.Data.Error}}</div>{{end}}
+
     {{with .Data.Result}}
-    <div class="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        <article class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900"><h2 class="text-sm text-slate-500">Borrower</h2><p class="mt-2 text-lg font-semibold">{{.Loan.CustomerName}}</p><p class="text-sm">{{.Loan.PrimaryAccount}}{{if .Loan.AlternateAccount}} · {{.Loan.AlternateAccount}}{{end}}</p><p class="text-sm text-slate-500">{{.Loan.Branch}} · {{.Loan.Product}}</p></article>
-        <article class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900"><h2 class="text-sm text-slate-500">Contract</h2><p class="mt-2 text-lg font-semibold">Rp {{.ContractPrincipal}}</p><p class="text-sm">{{.Loan.TenorMonths}} months · flat {{.FlatRate}}% · reference {{.ReferenceRate}}%</p><p class="text-sm text-slate-500">Periodic Rp {{.PeriodicPrincipal}} + Rp {{.PeriodicInterest}}</p></article>
-        <article class="rounded-2xl border border-emerald-300 bg-emerald-50 p-5 shadow-sm dark:border-emerald-900 dark:bg-emerald-950"><h2 class="text-sm text-emerald-700 dark:text-emerald-300">Principal outstanding</h2><p class="mt-2 text-2xl font-bold">Rp {{.PrincipalOutstanding}}</p><p class="text-sm">Source: {{.Position.Source}} · kolek {{.Position.CollectabilityBI}}</p></article>
-        <article class="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900"><h2 class="text-sm text-slate-500">Principal due</h2><p class="mt-2 text-xl font-semibold">Rp {{.PrincipalDue}}</p></article>
-        <article class="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900"><h2 class="text-sm text-slate-500">Interest due</h2><p class="mt-2 text-xl font-semibold">Rp {{.InterestDue}}</p></article>
-        <article class="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900"><h2 class="text-sm text-slate-500">Penalty reference</h2><p class="mt-2 text-xl font-semibold">Rp {{.PenaltyDue}}</p></article>
-        <article class="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900"><h2 class="text-sm text-slate-500">ET estimate</h2><p class="mt-2 text-xl font-semibold">Rp {{.EarlyTerminationEstimate}}</p><p class="text-sm text-slate-500">6 contractual installments</p></article>
-        <article class="rounded-2xl border border-slate-200 bg-white p-5 dark:border-slate-800 dark:bg-slate-900"><h2 class="text-sm text-slate-500">Installment schedule</h2><p class="mt-2 text-xl font-semibold">{{.DueDateCount}}</p><p class="text-sm text-slate-500">Contractual installments</p></article>
-    </div>
-    {{if .ContractualSchedule}}
-    <div>
-        <div class="mb-3"><h2 class="text-xl font-semibold">Contractual installment schedule</h2><p class="mt-1 text-sm text-slate-500">Scheduled balance follows contract dates and amounts. Principal outstanding above reflects actual reconstructed payment allocation.</p></div>
-        <div class="overflow-x-auto rounded-xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+    <article class="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm dark:border-slate-800 dark:bg-slate-900">
+        <header class="flex flex-col gap-3 border-b border-slate-200 px-5 py-4 sm:flex-row sm:items-center sm:justify-between dark:border-slate-800">
+            <div>
+                <h2 class="text-sm font-semibold uppercase tracking-wide text-slate-600 dark:text-slate-300">RIWAYAT TRANSAKSI PINJAMAN</h2>
+                <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">{{.PeriodLabel}}</p>
+            </div>
+            {{if .IsReconstructed}}
+            <span class="inline-flex w-fit items-center gap-2 rounded-full bg-blue-50 px-3 py-1.5 text-xs font-semibold text-blue-700 dark:bg-blue-950 dark:text-blue-200">
+                <span class="h-2 w-2 rounded-full bg-blue-500" aria-hidden="true"></span>
+                Flat rate repayment (calculated)
+            </span>
+            {{end}}
+        </header>
+
+        <div class="grid text-sm md:grid-cols-2">
+            <dl class="space-y-3 p-5 sm:p-6">
+                <div class="grid gap-1 sm:grid-cols-[11rem_1fr] sm:gap-3"><dt class="text-xs font-semibold uppercase tracking-wide text-slate-500">NAMA NASABAH</dt><dd class="font-semibold text-slate-900 dark:text-slate-100">{{.CustomerName}}</dd></div>
+                <div class="grid gap-1 sm:grid-cols-[11rem_1fr] sm:gap-3"><dt class="text-xs font-semibold uppercase tracking-wide text-slate-500">REKENING</dt><dd class="font-semibold text-slate-900 dark:text-slate-100">{{.PrimaryAccount}}</dd></div>
+                <div class="grid gap-1 sm:grid-cols-[11rem_1fr] sm:gap-3"><dt class="text-xs font-semibold uppercase tracking-wide text-slate-500">ALT REKENING</dt><dd class="font-semibold text-slate-900 dark:text-slate-100">{{.AlternateAccount}}</dd></div>
+                <div class="grid gap-1 sm:grid-cols-[11rem_1fr] sm:gap-3"><dt class="text-xs font-semibold uppercase tracking-wide text-slate-500">KANTOR CABANG</dt><dd class="font-semibold text-slate-900 dark:text-slate-100">{{.Branch}}</dd></div>
+                <div class="grid gap-1 sm:grid-cols-[11rem_1fr] sm:gap-3"><dt class="text-xs font-semibold uppercase tracking-wide text-slate-500">PRODUK</dt><dd class="font-semibold text-slate-900 dark:text-slate-100">{{.Product}}</dd></div>
+                <div class="grid gap-1 sm:grid-cols-[11rem_1fr] sm:gap-3"><dt class="text-xs font-semibold uppercase tracking-wide text-slate-500">PERIODE PINJAMAN</dt><dd class="font-semibold text-slate-900 dark:text-slate-100">{{.LoanPeriod}}</dd></div>
+                <div class="grid gap-1 sm:grid-cols-[11rem_1fr] sm:gap-3"><dt class="text-xs font-semibold uppercase tracking-wide text-slate-500">ANGSURAN</dt><dd class="font-semibold text-slate-900 dark:text-slate-100">{{.InstallmentSummary}}<span class="mt-0.5 block text-xs font-normal text-slate-500">Contractual due dates through reporting date; not payment status.</span></dd></div>
+                <div class="grid gap-1 sm:grid-cols-[11rem_1fr] sm:gap-3"><dt class="text-xs font-semibold uppercase tracking-wide text-slate-500">DENDA PELUNASAN DIPERCEPAT</dt><dd class="font-semibold text-slate-900 dark:text-slate-100">{{.EarlyTerminationEstimate}}<span class="mt-0.5 block text-xs font-normal text-slate-500">{{.EarlyTerminationNote}}</span></dd></div>
+            </dl>
+
+            <dl class="space-y-3 border-t border-slate-200 p-5 sm:p-6 md:border-l md:border-t-0 dark:border-slate-800">
+                <div class="grid gap-1 sm:grid-cols-[10rem_1fr] sm:gap-3"><dt class="text-xs font-semibold uppercase tracking-wide text-slate-500">PLAFON AKAD</dt><dd class="font-semibold text-slate-900 dark:text-slate-100">{{.ContractPrincipal}}</dd></div>
+                <div class="grid gap-1 sm:grid-cols-[10rem_1fr] sm:gap-3"><dt class="text-xs font-semibold uppercase tracking-wide text-slate-500">SB EFEKTIF</dt><dd class="font-semibold text-slate-900 dark:text-slate-100">{{.ReferenceRate}}</dd></div>
+                <div class="grid gap-1 sm:grid-cols-[10rem_1fr] sm:gap-3"><dt class="text-xs font-semibold uppercase tracking-wide text-slate-500">SB KONTRAK</dt><dd class="font-semibold text-slate-900 dark:text-slate-100">{{.FlatRate}}</dd></div>
+                <div class="grid gap-1 sm:grid-cols-[10rem_1fr] sm:gap-3"><dt class="text-xs font-semibold uppercase tracking-wide text-slate-500">KOLEK</dt><dd class="font-semibold text-slate-900 dark:text-slate-100">{{.Collectability}}</dd></div>
+                <div class="grid gap-1 sm:grid-cols-[10rem_1fr] sm:gap-3"><dt class="text-xs font-semibold uppercase tracking-wide text-slate-500">BAKI DEBET</dt><dd class="font-semibold text-slate-900 dark:text-slate-100">{{.PrincipalOutstanding}}</dd></div>
+                <div class="grid gap-1 sm:grid-cols-[10rem_1fr] sm:gap-3"><dt class="text-xs font-semibold uppercase tracking-wide text-slate-500">TUNGGAKAN POKOK</dt><dd class="font-semibold text-slate-900 dark:text-slate-100">{{.PrincipalDue}}</dd></div>
+                <div class="grid gap-1 sm:grid-cols-[10rem_1fr] sm:gap-3"><dt class="text-xs font-semibold uppercase tracking-wide text-slate-500">TUNGGAKAN BUNGA</dt><dd class="font-semibold text-slate-900 dark:text-slate-100">{{.InterestDue}}</dd></div>
+                <div class="grid gap-1 sm:grid-cols-[10rem_1fr] sm:gap-3"><dt class="text-xs font-semibold uppercase tracking-wide text-slate-500">TUNGGAKAN PINALTI</dt><dd class="font-semibold text-slate-900 dark:text-slate-100">{{.PenaltyDue}}</dd></div>
+            </dl>
+        </div>
+    </article>
+
+    <section class="min-w-0 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-6 dark:border-slate-800 dark:bg-slate-900">
+        <header class="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+                <p class="text-xs font-semibold uppercase tracking-wide text-emerald-600 dark:text-emerald-400">REPAYMENT PLAN</p>
+                <h2 class="mt-1 text-xl font-semibold">Installment Schedule</h2>
+            </div>
+            <a href="{{.PrintURL}}" target="_blank" rel="noopener" class="inline-flex w-fit items-center rounded-lg border border-slate-300 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50 dark:border-slate-700 dark:text-slate-200 dark:hover:bg-slate-800">Print PDF</a>
+        </header>
+
+        <div class="overflow-x-auto rounded-xl border border-slate-200 dark:border-slate-800">
             <table class="min-w-full divide-y divide-slate-200 text-sm dark:divide-slate-800">
-                <thead class="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:bg-slate-900/80 dark:text-slate-400"><tr><th class="whitespace-nowrap px-4 py-3 text-left">No.</th><th class="whitespace-nowrap px-4 py-3 text-left">Due date</th><th class="whitespace-nowrap px-4 py-3 text-right">Contractual principal</th><th class="whitespace-nowrap px-4 py-3 text-right">Contractual interest</th><th class="whitespace-nowrap px-4 py-3 text-right">Contractual installment</th><th class="whitespace-nowrap px-4 py-3 text-right">Scheduled balance</th></tr></thead>
-                <tbody class="divide-y divide-slate-100 dark:divide-slate-800">{{range .ContractualSchedule}}<tr class="hover:bg-slate-50 dark:hover:bg-slate-800/40"><td class="whitespace-nowrap px-4 py-3">{{.Number}}</td><td class="whitespace-nowrap px-4 py-3">{{.DueDate}}</td><td class="whitespace-nowrap px-4 py-3 text-right">Rp {{.Principal}}</td><td class="whitespace-nowrap px-4 py-3 text-right">Rp {{.Interest}}</td><td class="whitespace-nowrap px-4 py-3 text-right font-medium">Rp {{.Installment}}</td><td class="whitespace-nowrap px-4 py-3 text-right">Rp {{.ScheduledBalance}}</td></tr>{{end}}</tbody>
+                <thead class="bg-slate-50 text-xs font-semibold uppercase tracking-wide text-slate-500 dark:bg-slate-950 dark:text-slate-400">
+                    <tr><th class="whitespace-nowrap px-4 py-3 text-left">NO.</th><th class="whitespace-nowrap px-4 py-3 text-left">DATE</th><th class="whitespace-nowrap px-4 py-3 text-right">INSTALLMENT</th><th class="whitespace-nowrap px-4 py-3 text-right">PRINCIPAL</th><th class="whitespace-nowrap px-4 py-3 text-right">INTEREST</th><th class="whitespace-nowrap px-4 py-3 text-right">OUTSTANDING</th><th class="whitespace-nowrap px-4 py-3 text-left">STATUS</th></tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100 dark:divide-slate-800">
+                    {{range .ScheduleRows}}
+                    <tr class="hover:bg-slate-50 dark:hover:bg-slate-800/40"><td class="whitespace-nowrap px-4 py-3 font-semibold">{{.Number}}</td><td class="whitespace-nowrap px-4 py-3">{{.Date}}</td><td class="whitespace-nowrap px-4 py-3 text-right font-medium">{{.Installment}}</td><td class="whitespace-nowrap px-4 py-3 text-right">{{.Principal}}</td><td class="whitespace-nowrap px-4 py-3 text-right">{{.Interest}}</td><td class="whitespace-nowrap px-4 py-3 text-right font-medium">{{.Outstanding}}</td><td class="whitespace-nowrap px-4 py-3 text-xs font-semibold tracking-wide text-slate-500">{{.Status}}</td></tr>
+                    {{else}}
+                    <tr><td colspan="7" class="px-4 py-6 text-center text-slate-500">No contractual schedule available.</td></tr>
+                    {{end}}
+                </tbody>
             </table>
         </div>
-    </div>
-    {{end}}
+    </section>
     {{end}}
 </section>
 {{end}}
