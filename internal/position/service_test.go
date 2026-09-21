@@ -53,6 +53,7 @@ func TestPositionServiceClosedAsOfSkipsHistoricalDependencies(t *testing.T) {
 			if !reflect.DeepEqual(resolved.Loan, contract) || position.Source != loan.SourceClosed || !position.AsOf.Equal(asOf) ||
 				position.AccountNumber != "primary" || position.CollectabilityBI != 5 ||
 				!position.PrincipalOutstanding.IsZero() || !position.PrincipalDue.IsZero() || !position.InterestDue.IsZero() ||
+				!resolved.ActualPosition.PrincipalDue.IsZero() || !resolved.ActualPosition.InterestDue.IsZero() || !resolved.ActualPosition.PenaltyDue.IsZero() ||
 				fincloud.calls != 1 || mso.historicalCalls != 0 || mso.openingCalls != 0 ||
 				dwh.exactCalls != 0 || dwh.timelineCalls != 0 || snapshot.calls != 0 || calculator.calls != 0 {
 				t.Fatalf("resolved=%+v calls: Fincloud=%d MSO=%d/%d DWH=%d/%d snapshot=%d calculator=%d",
@@ -113,6 +114,7 @@ func TestPositionServiceClosedAlternateFromFincloudDateObject(t *testing.T) {
 		resolved.Loan.FlatRatePercent.Cmp(loan.MustMoney("11.76")) != 0 || resolved.Position.Source != loan.SourceClosed ||
 		resolved.Position.AccountNumber != primary || resolved.Position.CollectabilityBI != 2 ||
 		!resolved.Position.PrincipalOutstanding.IsZero() || !resolved.Position.PrincipalDue.IsZero() || !resolved.Position.InterestDue.IsZero() ||
+		!resolved.ActualPosition.PrincipalDue.IsZero() || !resolved.ActualPosition.InterestDue.IsZero() || !resolved.ActualPosition.PenaltyDue.IsZero() ||
 		detailCalls.Load() != 2 || searchCalls.Load() != 1 || mso.historicalCalls != 0 || mso.openingCalls != 0 ||
 		dwh.exactCalls != 0 || dwh.timelineCalls != 0 || snapshot.calls != 0 || calculator.calls != 0 {
 		t.Fatalf("resolved=%+v calls: detail=%d search=%d MSO=%d/%d DWH=%d/%d snapshot=%d calculator=%d",
@@ -259,10 +261,13 @@ func TestPositionServiceSelectsAuthoritativeSource(t *testing.T) {
 				contract.ContractScheduleEvidence = []loan.ContractualInstallmentEvidence{{Number: 1, RawDueDate: "bad"}}
 			}
 			fincloud := &fincloudFake{contract: contract}
-			mso := &msoFake{historical: loan.LoanPosition{AccountNumber: "01.301.12345", Source: loan.SourceMSO}, opening: loan.OpeningLoanState{AccountNumber: "01.301.12345", InterestType: test.interestType, PrincipalOutstanding: loan.MustMoney("100"), CollectabilityBI: 2}}
-			dwh := &dwhFake{exact: loan.LoanPosition{LoanStartDate: parseDate(loanStartDate, location), Source: loan.SourceDWH}, timeline: []loan.CollectabilityPoint{{Date: parseDate("2026-09-13", location), Value: 3}}}
-			snapshot := &snapshotFake{position: loan.LoanPosition{LoanStartDate: parseDate(loanStartDate, location), Source: loan.SourceTodaySnapshot, CollectabilityBI: 4}}
-			calculator := &calculatorFake{result: loan.CalculationResult{AsOf: asOf, PrincipalOutstanding: loan.MustMoney("55"), CollectabilityBI: 4}}
+			mso := &msoFake{
+				historical: loan.LoanPosition{AccountNumber: "01.301.12345", PrincipalDue: loan.MustMoney("10"), InterestDue: loan.MustMoney("5"), PenaltyDue: loan.MustMoney("2"), Source: loan.SourceMSO},
+				opening:    loan.OpeningLoanState{AccountNumber: "01.301.12345", InterestType: test.interestType, PrincipalOutstanding: loan.MustMoney("100"), PrincipalDue: loan.MustMoney("11"), InterestDue: loan.MustMoney("6"), PenaltyDue: loan.MustMoney("3"), CollectabilityBI: 2},
+			}
+			dwh := &dwhFake{exact: loan.LoanPosition{LoanStartDate: parseDate(loanStartDate, location), PrincipalDue: loan.MustMoney("20"), InterestDue: loan.MustMoney("7"), PenaltyDue: loan.MustMoney("4"), Source: loan.SourceDWH}, timeline: []loan.CollectabilityPoint{{Date: parseDate("2026-09-13", location), Value: 3}}}
+			snapshot := &snapshotFake{position: loan.LoanPosition{LoanStartDate: parseDate(loanStartDate, location), PrincipalDue: loan.MustMoney("30"), InterestDue: loan.MustMoney("8"), PenaltyDue: loan.MustMoney("5"), Source: loan.SourceTodaySnapshot, CollectabilityBI: 4}}
+			calculator := &calculatorFake{result: loan.CalculationResult{AsOf: asOf, PrincipalOutstanding: loan.MustMoney("55"), PrincipalDue: loan.MustMoney("40"), InterestDue: loan.MustMoney("9"), CollectabilityBI: 4}}
 			service, err := NewService(fincloud, mso, dwh, snapshot, calculator, location)
 			if err != nil {
 				t.Fatal(err)
@@ -294,12 +299,21 @@ func TestPositionServiceSelectsAuthoritativeSource(t *testing.T) {
 				t.Fatalf("canonical result account = %q", result.Position.AccountNumber)
 			}
 			if test.wantCalculator == 1 {
+				wantActual := dwh.exact
+				if asOf.Equal(today) {
+					wantActual = snapshot.position
+				}
+				if result.Position.PrincipalOutstanding.Cmp(loan.MustMoney("55")) != 0 || result.Position.PrincipalDue.Cmp(loan.MustMoney("40")) != 0 || result.Position.InterestDue.Cmp(loan.MustMoney("9")) != 0 || !reflect.DeepEqual(result.ActualPosition, wantActual) {
+					t.Fatalf("contractual=%+v actual=%+v want actual=%+v", result.Position, result.ActualPosition, wantActual)
+				}
 				if calculator.input.Opening.CollectabilityBI != 2 || len(calculator.input.CollectabilityTimeline) != test.wantTimeline+test.wantSnapshot || calculator.input.ContractualPrincipal.Format(2) != "100.00" {
 					t.Fatalf("calculator input = %+v", calculator.input)
 				}
 				if asOf.Equal(today) && calculator.input.CollectabilityTimeline[len(calculator.input.CollectabilityTimeline)-1].Value != 4 {
 					t.Fatalf("today collectability was not reused from snapshot: %+v", calculator.input.CollectabilityTimeline)
 				}
+			} else if !reflect.DeepEqual(result.ActualPosition, result.Position) {
+				t.Fatalf("selected=%+v actual=%+v", result.Position, result.ActualPosition)
 			}
 		})
 	}
@@ -332,7 +346,7 @@ func TestPositionServiceFincloudNativeRoutesWithoutMSO(t *testing.T) {
 			position := loan.LoanPosition{
 				AsOf: parseDate(test.asOf, location), LoanStartDate: parseDate(test.loanStartDate, location), AccountNumber: "primary",
 				PrincipalOutstanding: loan.MustMoney("76543210"), PrincipalDue: loan.MustMoney("100000"),
-				InterestDue: loan.MustMoney("20000"), CollectabilityBI: 2, Source: test.wantSource,
+				InterestDue: loan.MustMoney("20000"), PenaltyDue: loan.MustMoney("5000"), CollectabilityBI: 2, Source: test.wantSource,
 			}
 			dwh := &dwhFake{exact: position}
 			snapshot := &snapshotFake{position: position}
@@ -352,11 +366,11 @@ func TestPositionServiceFincloudNativeRoutesWithoutMSO(t *testing.T) {
 					t.Fatalf("result=%+v", result)
 				}
 				if test.wantSource == loan.SourceClosed {
-					if !result.Position.PrincipalOutstanding.IsZero() || !result.Position.PrincipalDue.IsZero() || !result.Position.InterestDue.IsZero() {
+					if !result.Position.PrincipalOutstanding.IsZero() || !result.Position.PrincipalDue.IsZero() || !result.Position.InterestDue.IsZero() || !result.ActualPosition.PrincipalDue.IsZero() || !result.ActualPosition.InterestDue.IsZero() || !result.ActualPosition.PenaltyDue.IsZero() {
 						t.Fatalf("closed position=%+v", result.Position)
 					}
-				} else if !reflect.DeepEqual(result.Position, position) {
-					t.Fatalf("position=%+v want=%+v", result.Position, position)
+				} else if !reflect.DeepEqual(result.Position, position) || !reflect.DeepEqual(result.ActualPosition, position) {
+					t.Fatalf("position=%+v actual=%+v want=%+v", result.Position, result.ActualPosition, position)
 				}
 			}
 			if fincloud.calls != 1 || mso.historicalCalls != 0 || mso.openingCalls != 0 ||

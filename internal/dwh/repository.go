@@ -33,6 +33,7 @@ type positionRow struct {
 	CollectabilityBI     int            `db:"kolektibilitas_bi"`
 	PrincipalDue         loan.Money     `db:"tunggakan_pokok"`
 	InterestDue          loan.Money     `db:"tunggakan_bunga"`
+	PenaltyDue           loan.Money     `db:"denda_tunggakan"`
 }
 
 type collectabilityRow struct {
@@ -42,7 +43,7 @@ type collectabilityRow struct {
 
 func (repository *Repository) ExactPosition(ctx context.Context, account string, asOf loan.Date) (loan.LoanPosition, error) {
 	const query = `
-		SELECT as_of_date, no_rekening, periode_mulai, sisa_pokok_pinjaman, kolektibilitas_bi, tunggakan_pokok, tunggakan_bunga
+		SELECT as_of_date, no_rekening, periode_mulai, sisa_pokok_pinjaman, kolektibilitas_bi, tunggakan_pokok, tunggakan_bunga, denda_tunggakan
 		FROM dwhv2.fincloud_eod_detail_outstanding_rekening_pinjaman
 		WHERE no_rekening = ? AND as_of_date = ?
 		LIMIT 1`
@@ -53,7 +54,7 @@ func (repository *Repository) ExactPosition(ctx context.Context, account string,
 		}
 		return loan.LoanPosition{}, errors.Join(loan.ErrDWHUnavailable, err)
 	}
-	if err := validateBalances(row.PrincipalOutstanding, row.PrincipalDue, row.InterestDue, row.CollectabilityBI); err != nil {
+	if err := validateBalances(row.PrincipalOutstanding, row.PrincipalDue, row.InterestDue, row.PenaltyDue, row.CollectabilityBI); err != nil {
 		return loan.LoanPosition{}, err
 	}
 	periodStart := strings.TrimSpace(row.PeriodStart.String)
@@ -63,7 +64,7 @@ func (repository *Repository) ExactPosition(ctx context.Context, account string,
 	}
 	return loan.LoanPosition{
 		AsOf: loan.NewDate(row.AsOf, repository.location), LoanStartDate: loan.NewDate(parsedStart, repository.location), AccountNumber: strings.TrimSpace(row.AccountNumber),
-		PrincipalOutstanding: row.PrincipalOutstanding, PrincipalDue: row.PrincipalDue, InterestDue: row.InterestDue,
+		PrincipalOutstanding: row.PrincipalOutstanding, PrincipalDue: row.PrincipalDue, InterestDue: row.InterestDue, PenaltyDue: row.PenaltyDue,
 		CollectabilityBI: row.CollectabilityBI, Source: loan.SourceDWH,
 	}, nil
 }
@@ -100,8 +101,8 @@ func (repository *Repository) CollectabilityTimeline(ctx context.Context, accoun
 	return points, nil
 }
 
-func validateBalances(principal, principalDue, interestDue loan.Money, collectability int) error {
-	if principal.IsNegative() || principalDue.IsNegative() || interestDue.IsNegative() || principalDue.Cmp(principal) > 0 || collectability < 1 || collectability > 5 {
+func validateBalances(principal, principalDue, interestDue, penaltyDue loan.Money, collectability int) error {
+	if principal.IsNegative() || principalDue.IsNegative() || interestDue.IsNegative() || penaltyDue.IsNegative() || principalDue.Cmp(principal) > 0 || collectability < 1 || collectability > 5 {
 		return fmt.Errorf("%w: invalid DWH loan position", loan.ErrHistoricalEvidence)
 	}
 	return nil

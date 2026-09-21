@@ -44,6 +44,7 @@ type stateRow struct {
 	PrincipalOutstanding loan.Money `db:"principal_outstanding"`
 	PrincipalDue         loan.Money `db:"principal_due"`
 	InterestDue          loan.Money `db:"interest_due"`
+	PenaltyDue           loan.Money `db:"penalty_due"`
 	CollectabilityBI     int        `db:"-"`
 	CollectabilityCode   string     `db:"collectability_bi"`
 }
@@ -55,7 +56,8 @@ func (repository *Repository) HistoricalPosition(ctx context.Context, account st
 	}
 	return loan.LoanPosition{
 		AsOf: asOf, AccountNumber: strings.TrimSpace(account), PrincipalOutstanding: row.PrincipalOutstanding,
-		PrincipalDue: row.PrincipalDue, InterestDue: row.InterestDue, CollectabilityBI: row.CollectabilityBI, Source: loan.SourceMSO,
+		PrincipalDue: row.PrincipalDue, InterestDue: row.InterestDue, PenaltyDue: row.PenaltyDue,
+		CollectabilityBI: row.CollectabilityBI, Source: loan.SourceMSO,
 	}, nil
 }
 
@@ -81,7 +83,7 @@ func (repository *Repository) OpeningState(ctx context.Context, account string, 
 	return loan.OpeningLoanState{
 		AccountNumber: strings.TrimSpace(account), InterestType: strings.TrimSpace(interestType),
 		PrincipalOutstanding: row.PrincipalOutstanding, PrincipalDue: row.PrincipalDue,
-		InterestDue: row.InterestDue, CollectabilityBI: row.CollectabilityBI,
+		InterestDue: row.InterestDue, PenaltyDue: row.PenaltyDue, CollectabilityBI: row.CollectabilityBI,
 	}, nil
 }
 
@@ -91,11 +93,12 @@ func (repository *Repository) state(ctx context.Context, account string, asOf lo
 			HitungKreditBakiDebet(?, ?) AS principal_outstanding,
 			HitungKreditTunggakPokok(?, ?) AS principal_due,
 			HitungKreditTunggakBunga(?, ?) AS interest_due,
+			HitungKreditDenda(?, ?) AS penalty_due,
 			GetKreditKolek(?, ?) AS collectability_bi`
 	account = strings.TrimSpace(account)
 	date := asOf.String()
 	var row stateRow
-	if err := repository.database.GetContext(ctx, &row, query, account, date, account, date, account, date, account, date); err != nil {
+	if err := repository.database.GetContext(ctx, &row, query, account, date, account, date, account, date, account, date, account, date); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return stateRow{}, errors.Join(loan.ErrNotFound, loan.ErrHistoricalEvidence)
 		}
@@ -106,7 +109,7 @@ func (repository *Repository) state(ctx context.Context, account string, asOf lo
 		return stateRow{}, err
 	}
 	row.CollectabilityBI = collectability
-	if row.PrincipalOutstanding.IsNegative() || row.PrincipalDue.IsNegative() || row.InterestDue.IsNegative() || row.PrincipalDue.Cmp(row.PrincipalOutstanding) > 0 || row.CollectabilityBI < 1 || row.CollectabilityBI > 5 {
+	if row.PrincipalOutstanding.IsNegative() || row.PrincipalDue.IsNegative() || row.InterestDue.IsNegative() || row.PenaltyDue.IsNegative() || row.PrincipalDue.Cmp(row.PrincipalOutstanding) > 0 || row.CollectabilityBI < 1 || row.CollectabilityBI > 5 {
 		return stateRow{}, fmt.Errorf("%w: invalid MSO loan position", loan.ErrHistoricalEvidence)
 	}
 	return row, nil

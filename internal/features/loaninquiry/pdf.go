@@ -192,7 +192,6 @@ func writePDFLoanInformation(pdf *fpdf.Fpdf, view ResultView) {
 	pdf.SetY(y + float64(len(left))*5 + 4)
 	pdf.SetFont("Helvetica", "I", 6.5)
 	pdf.SetTextColor(100, 116, 139)
-	pdf.CellFormat(186, 4, "Angsuran shows contractual due dates through the reporting date; it is not payment status. Early termination estimate: "+view.EarlyTerminationNote+".", "", 1, "L", false, 0, "")
 }
 
 func writePDFDetailColumn(pdf *fpdf.Fpdf, x, y float64, details []pdfDetail) {

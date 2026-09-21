@@ -50,7 +50,7 @@ func (source *Source) parse(body []byte, businessDate loan.Date) ([]loan.LoanPos
 	for index, name := range header {
 		columns[canonicalHeader(name)] = index
 	}
-	for _, required := range []string{"date params", "loan account no", "loan outstanding", "bi collectability", "principal arrears", "interest arrears"} {
+	for _, required := range []string{"date params", "loan account no", "loan outstanding", "bi collectability", "principal arrears", "interest arrears", "penalty arrears"} {
 		if _, ok := columns[required]; !ok {
 			return nil, fmt.Errorf("current snapshot report missing column %q", required)
 		}
@@ -99,12 +99,16 @@ func (source *Source) parse(body []byte, businessDate loan.Date) ([]loan.LoanPos
 		if err != nil {
 			return nil, fmt.Errorf("current snapshot line %d interest arrears: %w", line, err)
 		}
+		penaltyDue, err := parseSourceMoney(cell(record, columns, "penalty arrears"))
+		if err != nil {
+			return nil, fmt.Errorf("current snapshot line %d penalty arrears: %w", line, err)
+		}
 		collectabilityText := strings.TrimSpace(cell(record, columns, "bi collectability"))
 		collectability, parseErr := strconv.Atoi(collectabilityText)
 		if parseErr != nil || collectability < 1 || collectability > 5 {
 			return nil, fmt.Errorf("current snapshot line %d has invalid collectability", line)
 		}
-		if principal.IsNegative() || principalDue.IsNegative() || interestDue.IsNegative() || principalDue.Cmp(principal) > 0 {
+		if principal.IsNegative() || principalDue.IsNegative() || interestDue.IsNegative() || penaltyDue.IsNegative() || principalDue.Cmp(principal) > 0 {
 			return nil, fmt.Errorf("current snapshot line %d has invalid balances", line)
 		}
 		branch := strings.TrimSpace(cell(record, columns, "branch code"))
@@ -113,7 +117,7 @@ func (source *Source) parse(body []byte, businessDate loan.Date) ([]loan.LoanPos
 		}
 		row := loan.LoanPosition{
 			AsOf: asOf, LoanStartDate: loanStartDate, AccountNumber: account, PrincipalOutstanding: principal, PrincipalDue: principalDue,
-			InterestDue: interestDue, CollectabilityBI: collectability, Source: loan.SourceTodaySnapshot,
+			InterestDue: interestDue, PenaltyDue: penaltyDue, CollectabilityBI: collectability, Source: loan.SourceTodaySnapshot,
 			Branch: strings.TrimSpace(branch), Product: strings.TrimSpace(cell(record, columns, "product id")),
 			CIF: strings.TrimSpace(cell(record, columns, "cif no")), ContractNumber: strings.TrimSpace(cell(record, columns, "loan agreement no")),
 		}
@@ -185,6 +189,6 @@ func parseLoanStartDate(raw string, location *time.Location) (loan.Date, error) 
 
 func samePosition(left, right loan.LoanPosition) bool {
 	return left.AsOf.Equal(right.AsOf) && left.LoanStartDate.Equal(right.LoanStartDate) && left.PrincipalOutstanding.Cmp(right.PrincipalOutstanding) == 0 &&
-		left.PrincipalDue.Cmp(right.PrincipalDue) == 0 && left.InterestDue.Cmp(right.InterestDue) == 0 &&
+		left.PrincipalDue.Cmp(right.PrincipalDue) == 0 && left.InterestDue.Cmp(right.InterestDue) == 0 && left.PenaltyDue.Cmp(right.PenaltyDue) == 0 &&
 		left.CollectabilityBI == right.CollectabilityBI && left.Branch == right.Branch && left.Product == right.Product && left.CIF == right.CIF && left.ContractNumber == right.ContractNumber
 }

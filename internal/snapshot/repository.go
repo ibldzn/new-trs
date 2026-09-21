@@ -28,7 +28,7 @@ func NewRepository(database *sqlx.DB, location *time.Location) *Repository {
 func (repository *Repository) ExactPosition(ctx context.Context, account string, asOf loan.Date) (loan.LoanPosition, error) {
 	const query = `
 		SELECT account_number, as_of_date, loan_start_date, principal_outstanding, collectability_bi,
-		       principal_arrears, interest_arrears, branch, product, cif, contract_number, source_updated_at
+		       principal_arrears, interest_arrears, penalty_arrears, branch, product, cif, contract_number, source_updated_at
 		FROM current_loan_position_snapshot
 		WHERE account_number = ? AND as_of_date = ?`
 	var row struct {
@@ -39,6 +39,7 @@ func (repository *Repository) ExactPosition(ctx context.Context, account string,
 		CollectabilityBI     int            `db:"collectability_bi"`
 		PrincipalDue         loan.Money     `db:"principal_arrears"`
 		InterestDue          loan.Money     `db:"interest_arrears"`
+		PenaltyDue           loan.Money     `db:"penalty_arrears"`
 		Branch               sql.NullString `db:"branch"`
 		Product              sql.NullString `db:"product"`
 		CIF                  sql.NullString `db:"cif"`
@@ -51,7 +52,7 @@ func (repository *Repository) ExactPosition(ctx context.Context, account string,
 		}
 		return loan.LoanPosition{}, errors.Join(loan.ErrCurrentSnapshot, err)
 	}
-	if row.CollectabilityBI < 1 || row.CollectabilityBI > 5 || row.PrincipalOutstanding.IsNegative() || row.PrincipalDue.IsNegative() || row.InterestDue.IsNegative() || row.PrincipalDue.Cmp(row.PrincipalOutstanding) > 0 {
+	if row.CollectabilityBI < 1 || row.CollectabilityBI > 5 || row.PrincipalOutstanding.IsNegative() || row.PrincipalDue.IsNegative() || row.InterestDue.IsNegative() || row.PenaltyDue.IsNegative() || row.PrincipalDue.Cmp(row.PrincipalOutstanding) > 0 {
 		return loan.LoanPosition{}, fmt.Errorf("%w: invalid stored position", loan.ErrCurrentSnapshot)
 	}
 	if !row.LoanStartDate.Valid || row.LoanStartDate.Time.IsZero() {
@@ -63,7 +64,7 @@ func (repository *Repository) ExactPosition(ctx context.Context, account string,
 	}
 	position := loan.LoanPosition{
 		AsOf: loan.NewDate(row.AsOf, repository.location), LoanStartDate: loanStartDate, AccountNumber: row.AccountNumber,
-		PrincipalOutstanding: row.PrincipalOutstanding, PrincipalDue: row.PrincipalDue, InterestDue: row.InterestDue,
+		PrincipalOutstanding: row.PrincipalOutstanding, PrincipalDue: row.PrincipalDue, InterestDue: row.InterestDue, PenaltyDue: row.PenaltyDue,
 		CollectabilityBI: row.CollectabilityBI, Source: loan.SourceTodaySnapshot,
 		Branch: row.Branch.String, Product: row.Product.String, CIF: row.CIF.String, ContractNumber: row.ContractNumber.String,
 	}
@@ -100,16 +101,19 @@ func (repository *Repository) ReplaceAll(ctx context.Context, rows []loan.LoanPo
 }
 
 func insertRows(ctx context.Context, transaction *sqlx.Tx, rows []loan.LoanPosition, refreshedAt time.Time) error {
-	const columns = `(account_number, as_of_date, loan_start_date, principal_outstanding, collectability_bi, principal_arrears, interest_arrears, branch, product, cif, contract_number, source_updated_at, refreshed_at)`
+	const columns = `(account_number, as_of_date, loan_start_date, principal_outstanding, collectability_bi, principal_arrears, interest_arrears, penalty_arrears, branch, product, cif, contract_number, source_updated_at, refreshed_at)`
 	values := make([]string, 0, len(rows))
-	arguments := make([]any, 0, len(rows)*13)
+	arguments := make([]any, 0, len(rows)*14)
 	for _, row := range rows {
 		if row.LoanStartDate.IsZero() || row.LoanStartDate.After(row.AsOf) {
 			return fmt.Errorf("%w: invalid snapshot loan start date", loan.ErrHistoricalEvidence)
 		}
-		values = append(values, `(?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?)`)
+		if row.PenaltyDue.IsNegative() {
+			return fmt.Errorf("%w: invalid snapshot penalty arrears", loan.ErrCurrentSnapshot)
+		}
+		values = append(values, `(?, ?, ?, ?, ?, ?, ?, ?, NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), NULLIF(?, ''), ?, ?)`)
 		arguments = append(arguments, row.AccountNumber, row.AsOf.String(), row.LoanStartDate.String(), row.PrincipalOutstanding, row.CollectabilityBI,
-			row.PrincipalDue, row.InterestDue, row.Branch, row.Product, row.CIF, row.ContractNumber, row.SourceUpdatedAt, refreshedAt)
+			row.PrincipalDue, row.InterestDue, row.PenaltyDue, row.Branch, row.Product, row.CIF, row.ContractNumber, row.SourceUpdatedAt, refreshedAt)
 	}
 	query := `INSERT INTO current_loan_position_snapshot ` + columns + ` VALUES ` + strings.Join(values, ",")
 	if _, err := transaction.ExecContext(ctx, query, arguments...); err != nil {

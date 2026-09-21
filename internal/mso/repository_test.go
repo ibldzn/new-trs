@@ -138,15 +138,15 @@ func TestOpeningStateFixedInterestLookup(t *testing.T) {
 		WHERE
 			kre_rekening = ?`
 	state := queryResult{
-		columns: []string{"principal_outstanding", "principal_due", "interest_due", "collectability_bi"},
-		rows:    [][]driver.Value{{"100", "10", "5", "L"}},
+		columns: []string{"principal_outstanding", "principal_due", "interest_due", "penalty_due", "collectability_bi"},
+		rows:    [][]driver.Value{{"100", "10", "5", "250.5", "L"}},
 	}
 	cutoff := loan.NewDate(time.Date(2025, 10, 12, 0, 0, 0, 0, time.UTC), time.UTC)
 
 	repository, connection := newQueryRepository(t, state, queryResult{columns: []string{"interest_type"}, rows: [][]driver.Value{{" 10 "}}})
 	got, err := repository.OpeningState(context.Background(), " account ", cutoff)
-	if err != nil || got.InterestType != "10" {
-		t.Fatalf("opening state interest type = %q, %v", got.InterestType, err)
+	if err != nil || got.InterestType != "10" || got.PenaltyDue.Format(2) != "250.50" {
+		t.Fatalf("opening state = %+v, %v", got, err)
 	}
 	assertQuery(t, connection.calls[1], query, "account")
 
@@ -165,6 +165,49 @@ func TestOpeningStateFixedInterestLookup(t *testing.T) {
 			t.Fatalf("error = %v", err)
 		}
 	})
+}
+
+func TestHistoricalPositionQueriesAndMapsPenaltyDue(t *testing.T) {
+	state := queryResult{
+		columns: []string{"principal_outstanding", "principal_due", "interest_due", "penalty_due", "collectability_bi"},
+		rows:    [][]driver.Value{{"100", "10", "5", "250.5", "DPK"}},
+	}
+	repository, connection := newQueryRepository(t, state)
+	asOf := loan.NewDate(time.Date(2025, 10, 11, 0, 0, 0, 0, time.UTC), time.UTC)
+	position, err := repository.HistoricalPosition(context.Background(), " account ", asOf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if position.AccountNumber != "account" || position.PenaltyDue.Format(2) != "250.50" || position.Source != loan.SourceMSO {
+		t.Fatalf("position = %+v", position)
+	}
+	call := connection.calls[0]
+	if !strings.Contains(strings.Join(strings.Fields(call.query), " "), "HitungKreditDenda(?, ?) AS penalty_due") {
+		t.Fatalf("query = %q", call.query)
+	}
+	if len(call.args) != 10 {
+		t.Fatalf("query arguments = %+v", call.args)
+	}
+	for index, argument := range call.args {
+		want := any("account")
+		if index%2 == 1 {
+			want = "2025-10-11"
+		}
+		if argument.Value != want {
+			t.Fatalf("argument %d = %v, want %v", index, argument.Value, want)
+		}
+	}
+}
+
+func TestHistoricalPositionRejectsNegativePenaltyDue(t *testing.T) {
+	repository, _ := newQueryRepository(t, queryResult{
+		columns: []string{"principal_outstanding", "principal_due", "interest_due", "penalty_due", "collectability_bi"},
+		rows:    [][]driver.Value{{"100", "10", "5", "-1", "L"}},
+	})
+	asOf := loan.NewDate(time.Date(2025, 10, 11, 0, 0, 0, 0, time.UTC), time.UTC)
+	if _, err := repository.HistoricalPosition(context.Background(), "account", asOf); !errors.Is(err, loan.ErrHistoricalEvidence) {
+		t.Fatalf("error = %v", err)
+	}
 }
 
 func TestParseCollectabilityBI(t *testing.T) {

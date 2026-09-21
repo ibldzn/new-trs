@@ -78,9 +78,10 @@ func (service *Service) GetLoanPosition(ctx context.Context, account string, asO
 	}
 	if !contract.CloseDate.IsZero() && !contract.CloseDate.After(asOf) {
 		logDecision(ctx, contract, "", loan.SourceClosed, "closed_as_of")
-		return loan.ResolvedPosition{Loan: contract, Position: loan.LoanPosition{
+		position := loan.LoanPosition{
 			AsOf: asOf, AccountNumber: primary, CollectabilityBI: contract.CurrentCollectability, Source: loan.SourceClosed,
-		}}, nil
+		}
+		return loan.ResolvedPosition{Loan: contract, Position: position, ActualPosition: position}, nil
 	}
 	var exact loan.LoanPosition
 	if asOf.After(service.cutoff) {
@@ -100,7 +101,7 @@ func (service *Service) GetLoanPosition(ctx context.Context, account string, asO
 				selected, reason = loan.SourceTodaySnapshot, "fincloud_native_today"
 			}
 			logDecision(ctx, contract, "", selected, reason)
-			return loan.ResolvedPosition{Loan: contract, Position: exact}, nil
+			return loan.ResolvedPosition{Loan: contract, Position: exact, ActualPosition: exact}, nil
 		}
 	}
 	alternate := strings.TrimSpace(contract.AlternateAccount)
@@ -114,7 +115,7 @@ func (service *Service) GetLoanPosition(ctx context.Context, account string, asO
 			position.AccountNumber = primary
 		}
 		logDecision(ctx, contract, "", loan.SourceMSO, "before_cutoff")
-		return loan.ResolvedPosition{Loan: contract, Position: position}, err
+		return loan.ResolvedPosition{Loan: contract, Position: position, ActualPosition: position}, err
 	}
 	opening, err := service.mso.OpeningState(ctx, msoAccount, service.cutoff)
 	if err != nil {
@@ -123,7 +124,8 @@ func (service *Service) GetLoanPosition(ctx context.Context, account string, asO
 	opening.AccountNumber = primary
 	if asOf.Equal(service.cutoff) {
 		logDecision(ctx, contract, opening.InterestType, loan.SourceMSO, "cutoff_opening")
-		return loan.ResolvedPosition{Loan: contract, Position: openingPosition(opening, asOf)}, nil
+		position := openingPosition(opening, asOf)
+		return loan.ResolvedPosition{Loan: contract, Position: position, ActualPosition: position}, nil
 	}
 	if opening.InterestType != FlatInterestType {
 		selected := loan.SourceDWH
@@ -131,7 +133,7 @@ func (service *Service) GetLoanPosition(ctx context.Context, account string, asO
 			selected = loan.SourceTodaySnapshot
 		}
 		logDecision(ctx, contract, opening.InterestType, selected, "non_flat_interest_type")
-		return loan.ResolvedPosition{Loan: contract, Position: exact}, nil
+		return loan.ResolvedPosition{Loan: contract, Position: exact, ActualPosition: exact}, nil
 	}
 	if contract.ContractScheduleEvidence != nil {
 		contract.ContractSchedule, err = normalizeContractSchedule(contract.ContractScheduleEvidence, contract.TenorMonths, service.location)
@@ -170,7 +172,7 @@ func (service *Service) GetLoanPosition(ctx context.Context, account string, asO
 		CollectabilityBI: calculation.CollectabilityBI, UnappliedAmount: calculation.UnappliedAmount, Source: loan.SourceReconstructed,
 	}
 	logDecision(ctx, contract, opening.InterestType, loan.SourceReconstructed, "reconstructed")
-	return loan.ResolvedPosition{Loan: contract, Position: position, Trace: calculation.Trace, ContractualSchedule: calculation.ContractualSchedule}, nil
+	return loan.ResolvedPosition{Loan: contract, Position: position, ActualPosition: exact, Trace: calculation.Trace, ContractualSchedule: calculation.ContractualSchedule}, nil
 }
 
 func formatFincloudAltNoToMSO(account string) string {
@@ -191,7 +193,7 @@ func (service *Service) exactPosition(ctx context.Context, account string, asOf,
 func openingPosition(opening loan.OpeningLoanState, asOf loan.Date) loan.LoanPosition {
 	return loan.LoanPosition{
 		AsOf: asOf, AccountNumber: opening.AccountNumber, PrincipalOutstanding: opening.PrincipalOutstanding,
-		PrincipalDue: opening.PrincipalDue, InterestDue: opening.InterestDue,
+		PrincipalDue: opening.PrincipalDue, InterestDue: opening.InterestDue, PenaltyDue: opening.PenaltyDue,
 		CollectabilityBI: opening.CollectabilityBI, Source: loan.SourceMSO,
 	}
 }

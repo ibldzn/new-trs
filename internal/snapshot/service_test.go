@@ -102,6 +102,8 @@ func TestRefreshFailurePreservesPreviousSnapshot(t *testing.T) {
 	location := time.FixedZone("Jakarta", 7*60*60)
 	now := time.Date(2026, 9, 14, 1, 0, 0, 0, location)
 	today := loan.NewDate(now, location)
+	negativePenalty := positionRow(today, "new", "10")
+	negativePenalty.PenaltyDue = loan.MustMoney("-1")
 	for _, test := range []struct {
 		name   string
 		source *sourceFake
@@ -109,6 +111,7 @@ func TestRefreshFailurePreservesPreviousSnapshot(t *testing.T) {
 		{"fetch", &sourceFake{err: errors.New("upstream down")}},
 		{"validation", &sourceFake{rows: []loan.LoanPosition{positionRow(today, "same", "10"), positionRow(today, "same", "10")}}},
 		{"missing loan start date", &sourceFake{rows: []loan.LoanPosition{{AsOf: today, AccountNumber: "new", PrincipalOutstanding: loan.MustMoney("10"), CollectabilityBI: 1}}}},
+		{"negative penalty arrears", &sourceFake{rows: []loan.LoanPosition{negativePenalty}}},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			store := &storeFake{rows: []loan.LoanPosition{positionRow(today, "old", "9")}}

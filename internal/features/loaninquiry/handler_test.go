@@ -93,6 +93,20 @@ func TestResultViewFormatsAdministrativeLoanPresentation(t *testing.T) {
 	}
 }
 
+func TestResultViewSeparatesContractualOutstandingFromActualArrears(t *testing.T) {
+	resolved, asOf := syntheticResolved(t, 60)
+	view, err := newResultView(resolved, resolved.Loan.PrimaryAccount, asOf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if view.PrincipalOutstanding != "Rp 43,326,865.00" || view.PrincipalDue != "Rp 0.00" || view.InterestDue != "Rp 125,000.00" || view.PenaltyDue != "Rp 50,000.00" {
+		t.Fatalf("view balances: outstanding=%q principal due=%q interest due=%q penalty due=%q", view.PrincipalOutstanding, view.PrincipalDue, view.InterestDue, view.PenaltyDue)
+	}
+	if resolved.Position.PrincipalDue.Format(2) != "1666666.67" || resolved.Position.InterestDue.Format(2) != "650000.00" {
+		t.Fatalf("contractual reconstruction fixture lost distinction: %+v", resolved.Position)
+	}
+}
+
 func TestResultViewAddsPresentationOnlyDisbursementRow(t *testing.T) {
 	resolved, asOf := syntheticResolved(t, 3)
 	before := append([]loan.ContractualScheduleRow(nil), resolved.ContractualSchedule...)
@@ -158,7 +172,7 @@ func TestSuccessfulScreenUsesCohesiveLayoutAndPreservesInquiry(t *testing.T) {
 		"RIWAYAT TRANSAKSI PINJAMAN", "NAMA NASABAH", "REKENING", "ALT REKENING", "KANTOR CABANG", "PRODUK", "PERIODE PINJAMAN", "ANGSURAN", "DENDA PELUNASAN DIPERCEPAT",
 		"PLAFON AKAD", "SB EFEKTIF", "SB KONTRAK", "KOLEK", "BAKI DEBET", "TUNGGAKAN POKOK", "TUNGGAKAN BUNGA", "TUNGGAKAN PINALTI",
 		"REPAYMENT PLAN", "Installment Schedule", "Print PDF", "NO.", "DATE", "INSTALLMENT", "PRINCIPAL", "INTEREST", "OUTSTANDING", "STATUS",
-		"DWI SULASTRI", "Rp 100,000,000.00", "Rp 43,326,865.00", "34 dari 60", "DISBURSED",
+		"DWI SULASTRI", "Rp 100,000,000.00", "Rp 43,326,865.00", "Rp 125,000.00", "Rp 50,000.00", "34 dari 60", "DISBURSED",
 	} {
 		if !strings.Contains(body, text) {
 			t.Errorf("screen missing %q", text)
@@ -246,7 +260,7 @@ func TestPDFUsesSharedPositionAndReturnsBrandedMultipageDocument(t *testing.T) {
 	if pages := len(regexp.MustCompile(`/Type /Page\b`).FindAll(document, -1)); pages < 2 {
 		t.Fatalf("60-installment PDF page count=%d", pages)
 	}
-	for _, value := range []string{"DWI SULASTRI", "3000010000000061", "Rp 100,000,000.00", "Rp 43,326,865.00", "34 dari 60", "DISBURSED"} {
+	for _, value := range []string{"DWI SULASTRI", "3000010000000061", "Rp 100,000,000.00", "Rp 43,326,865.00", "Rp 125,000.00", "Rp 50,000.00", "34 dari 60", "DISBURSED"} {
 		if !strings.Contains(string(document), value) {
 			t.Errorf("PDF missing shared presentation value %q", value)
 		}
@@ -299,6 +313,10 @@ func syntheticResolved(t *testing.T, rowCount int) (loan.ResolvedPosition, loan.
 		Position: loan.LoanPosition{
 			AsOf: asOf, LoanStartDate: start, AccountNumber: "3000010000000061", PrincipalOutstanding: loan.MustMoney("43326865"),
 			PrincipalDue: loan.MustMoney("1666666.67"), InterestDue: loan.MustMoney("650000"), CollectabilityBI: 1, Source: loan.SourceReconstructed,
+		},
+		ActualPosition: loan.LoanPosition{
+			AsOf: asOf, LoanStartDate: start, AccountNumber: "3000010000000061", PrincipalOutstanding: loan.MustMoney("43326865"),
+			PrincipalDue: loan.MustMoney("0"), InterestDue: loan.MustMoney("125000"), PenaltyDue: loan.MustMoney("50000"), CollectabilityBI: 1, Source: loan.SourceDWH,
 		},
 		ContractualSchedule: schedule,
 	}, asOf

@@ -19,6 +19,7 @@ type LoanPosition struct {
 	PrincipalOutstanding Money
 	PrincipalDue         Money
 	InterestDue          Money
+	PenaltyDue           Money
 	CollectabilityBI     int
 	UnappliedAmount      Money
 	Source               PositionSource
@@ -35,6 +36,7 @@ type OpeningLoanState struct {
 	PrincipalOutstanding Money
 	PrincipalDue         Money
 	InterestDue          Money
+	PenaltyDue           Money
 	CollectabilityBI     int
 }
 
@@ -131,6 +133,7 @@ type CalculationResult struct {
 type ResolvedPosition struct {
 	Loan                ContractData
 	Position            LoanPosition
+	ActualPosition      LoanPosition
 	Trace               CalculationTrace
 	ContractualSchedule []ContractualScheduleRow
 }
