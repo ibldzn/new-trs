@@ -100,5 +100,5 @@ func safeGenerationError(err error) string {
 	if errors.Is(err, context.Canceled) {
 		return "LPS generation was canceled."
 	}
-	return "LPS generation failed because mandatory source data is unavailable or malformed."
+	return "LPS generation failed because mandatory source data is unavailable or malformed. " + err.Error()
 }

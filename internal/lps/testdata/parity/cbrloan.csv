@@ -1,0 +1,4 @@
+cifno|loan_no|collectibility|credit_limit_effective|outstanding|principal_arrears|start_date|mature_date
+C5|L1|9|5,000.99|4,000.99|100.99|2025-01-01|2027-01-01
+C2|L2|X|900.75|800.50|bad|2025-02-01|2027-02-01
+

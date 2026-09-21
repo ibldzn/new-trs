@@ -33,7 +33,7 @@ type DebtorTypeRepository interface {
 }
 
 type RateProvider interface {
-	RateAt(context.Context, time.Time) (loan.Money, error)
+	Rates(context.Context, time.Time) ([]RateEntry, error)
 }
 
 type Generator struct {
@@ -43,8 +43,6 @@ type Generator struct {
 	rates    RateProvider
 	location *time.Location
 }
-
-const maxCombinedLoanDetailBytes = 100 << 20
 
 type Input struct {
 	ParticipantCode string
@@ -73,10 +71,14 @@ func (generator *Generator) Generate(ctx context.Context, input Input, output io
 	if err != nil {
 		return Result{}, err
 	}
+	rates, err := generator.rates.Rates(ctx, time.Now())
+	if err != nil {
+		return Result{}, fmt.Errorf("fetch LPS rates: %w", err)
+	}
+
 	datePath := date.Format("20060102")
 	cbrPath := "/app/report/cbr/" + datePath
 	dailyPath := "/app/report/daily/" + datePath
-
 	customerBody, err := generator.reports.DownloadMaintenanceReport(ctx, "cbrcustomer.csv", cbrPath)
 	if err != nil {
 		return Result{}, fmt.Errorf("download DN source: %w", err)
@@ -93,6 +95,10 @@ func (generator *Generator) Generate(ctx context.Context, input Input, output io
 	if err != nil {
 		return Result{}, fmt.Errorf("download deposit balance source: %w", err)
 	}
+	standingBody, err := generator.reports.DownloadNamedReport(ctx, "Standing Order Report csv", "ALL", "", "", "", "", "", "")
+	if err != nil {
+		return Result{}, fmt.Errorf("download Standing Order source: %w", err)
+	}
 	loanBody, err := generator.reports.DownloadMaintenanceReport(ctx, "cbrloan.csv", cbrPath)
 	if err != nil {
 		return Result{}, fmt.Errorf("download DK source: %w", err)
@@ -101,71 +107,51 @@ func (generator *Generator) Generate(ctx context.Context, input Input, output io
 	if err != nil {
 		return Result{}, err
 	}
-	standingBody, _ := generator.reports.DownloadNamedReport(ctx, "Standing Order Report csv", "ALL", "", "", "", "", "", "")
 
-	customers, err := parseCustomers(customerBody)
+	customers, seenCIF, err := parseCustomers(customerBody)
 	if err != nil {
 		return Result{}, fmt.Errorf("parse DN source: %w", err)
-	}
-	standing, err := parseOptionalAccountDates(standingBody)
-	if err != nil {
-		return Result{}, fmt.Errorf("parse Standing Order source: %w", err)
-	}
-	balances, err := parseAccountMoney(balanceBody, []string{"account_number", "account_no", "rekening", "deposit_account"}, []string{"accrued_interest", "accrue_interest", "bunga_berjalan"})
-	if err != nil {
-		return Result{}, fmt.Errorf("parse deposit balances: %w", err)
-	}
-	interestArrears, err := parseAccountMoney(detailBody, []string{"loan_account_no", "loan_no", "account_number", "no_rekening"}, []string{"interest_arrears", "tunggakan_bunga"})
-	if err != nil {
-		return Result{}, fmt.Errorf("parse loan details: %w", err)
-	}
-
-	rateCache := make(map[string]loan.Money)
-	rateAt := func(value time.Time) (loan.Money, error) {
-		key := value.Format("20060102")
-		if rate, ok := rateCache[key]; ok {
-			return rate, nil
-		}
-		rate, err := generator.rates.RateAt(ctx, value)
-		if err != nil {
-			return loan.Money{}, err
-		}
-		if rate.IsNegative() || rate.IsZero() {
-			return loan.Money{}, fmt.Errorf("LPS rate is missing or invalid for %s", key)
-		}
-		rateCache[key] = rate
-		return rate, nil
-	}
-	reportingRate, err := rateAt(date)
-	if err != nil {
-		return Result{}, err
-	}
-	dsnRows, referencedCIF, err := buildDSN(savingsBody, depositBody, balances, standing, reportingRate, date, rateAt, generator.location)
-	if err != nil {
-		return Result{}, err
-	}
-	dkRows, loanCIF, err := buildDK(loanBody, interestArrears, generator.location)
-	if err != nil {
-		return Result{}, err
-	}
-	for cif := range loanCIF {
-		referencedCIF[cif] = struct{}{}
-	}
-	if err := generator.completeMissingCustomers(ctx, customers, referencedCIF); err != nil {
-		return Result{}, err
 	}
 	dnRows, err := generator.buildDN(ctx, customers)
 	if err != nil {
 		return Result{}, err
 	}
-	slices.Sort(dnRows)
-	slices.Sort(dsnRows)
-	slices.Sort(dkRows)
-	result := Result{Filename: fmt.Sprintf("LPS_%s_%s.zip", input.ParticipantCode, input.ReportingDate), DNRows: len(dnRows), DSNRows: len(dsnRows), DKRows: len(dkRows)}
-	files := map[string][]string{
-		fmt.Sprintf("DN_%s_%s_%s_%s.txt", input.ParticipantCode, input.ReportingDate, input.Period, input.Version):  dnRows,
-		fmt.Sprintf("DSN_%s_%s_%s_%s.txt", input.ParticipantCode, input.ReportingDate, input.Period, input.Version): dsnRows,
-		fmt.Sprintf("DK_%s_%s_%s_%s.txt", input.ParticipantCode, input.ReportingDate, input.Period, input.Version):  dkRows,
+	dsnRows, dsnCIF, err := buildDSN(savingsBody, depositBody, balanceBody, standingBody, input.ReportingDate, rates)
+	if err != nil {
+		return Result{}, err
+	}
+	dkRows, dkCIF, err := buildDK(loanBody, detailBody)
+	if err != nil {
+		return Result{}, err
+	}
+	for cif := range dkCIF {
+		dsnCIF[cif] = struct{}{}
+	}
+	additionalDNRows, err := generator.completeMissingDN(ctx, seenCIF, dsnCIF)
+	if err != nil {
+		return Result{}, err
+	}
+
+	type fileContent struct {
+		count int
+		body  string
+	}
+	dnBody := rowsBody(dnRows)
+	dnCount := strings.Count(dnBody, "\n")
+	if len(additionalDNRows) != 0 {
+		dnBody += strings.Join(additionalDNRows, "\n")
+		dnCount += len(additionalDNRows)
+	}
+	dsnBody := rowsBody(dsnRows)
+	dkBody := rowsBody(dkRows)
+	result := Result{
+		Filename: fmt.Sprintf("LPS_%s_%s.zip", input.ParticipantCode, input.ReportingDate),
+		DNRows:   dnCount, DSNRows: strings.Count(dsnBody, "\n"), DKRows: strings.Count(dkBody, "\n"),
+	}
+	files := map[string]fileContent{
+		fmt.Sprintf("DN_%s_%s_%s_%s.txt", input.ParticipantCode, input.ReportingDate, input.Period, input.Version):  {count: result.DNRows, body: dnBody},
+		fmt.Sprintf("DSN_%s_%s_%s_%s.txt", input.ParticipantCode, input.ReportingDate, input.Period, input.Version): {count: result.DSNRows, body: dsnBody},
+		fmt.Sprintf("DK_%s_%s_%s_%s.txt", input.ParticipantCode, input.ReportingDate, input.Period, input.Version):  {count: result.DKRows, body: dkBody},
 		fmt.Sprintf("DSJ_%s_%s_%s_%s.txt", input.ParticipantCode, input.ReportingDate, input.Period, input.Version): {},
 	}
 	archive := zip.NewWriter(output)
@@ -175,16 +161,10 @@ func (generator *Generator) Generate(ctx context.Context, input Input, output io
 			_ = archive.Close()
 			return Result{}, fmt.Errorf("create LPS file: %w", err)
 		}
-		rows := files[name]
-		if _, err := fmt.Fprintf(file, "H|%s|%s|%s|%s|%d\r\n", input.ParticipantCode, input.ReportingDate, input.Period, input.Version, len(rows)); err != nil {
+		content := files[name]
+		if _, err := file.Write(buildFileContent(input, content.count, content.body)); err != nil {
 			_ = archive.Close()
 			return Result{}, err
-		}
-		for _, row := range rows {
-			if _, err := io.WriteString(file, row+"\r\n"); err != nil {
-				_ = archive.Close()
-				return Result{}, err
-			}
 		}
 	}
 	if err := archive.Close(); err != nil {
@@ -209,47 +189,47 @@ func (generator *Generator) downloadLoanDetails(ctx context.Context, path string
 	if err == nil {
 		return body, nil
 	}
-	if !errors.Is(err, loan.ErrNotFound) {
-		return nil, fmt.Errorf("download loan details: %w", err)
-	}
-	var combined bytes.Buffer
-	var header string
-	parts := 0
-	for number := 1; number <= 999; number++ {
+	var combined strings.Builder
+	var headerSet map[string]struct{}
+	for number := 1; number <= 8; number++ {
 		name := fmt.Sprintf("DetailOutstandingRekeningPinjaman_%03d.csv", number)
-		part, partErr := generator.reports.DownloadMaintenanceReport(ctx, name, path)
-		if errors.Is(partErr, loan.ErrNotFound) && parts > 0 {
-			break
+		part, err := generator.reports.DownloadMaintenanceReport(ctx, name, path)
+		if err != nil {
+			return nil, fmt.Errorf("download loan detail part %03d: %w", number, err)
 		}
-		if partErr != nil {
-			return nil, fmt.Errorf("download loan detail part %03d: %w", number, partErr)
+		reader := newCSVReader(part)
+		header, err := reader.Read()
+		if err != nil {
+			return nil, fmt.Errorf("read loan detail part %03d header: %w", number, err)
 		}
-		if combined.Len()+len(part) > maxCombinedLoanDetailBytes {
-			return nil, fmt.Errorf("combined loan detail report exceeds size limit")
-		}
-		lines := strings.Split(strings.TrimPrefix(string(part), "\uFEFF"), "\n")
-		if len(lines) == 0 || strings.TrimSpace(lines[0]) == "" {
-			return nil, fmt.Errorf("loan detail part %03d has no header", number)
-		}
-		currentHeader := strings.TrimRight(lines[0], "\r")
-		if header == "" {
-			header = currentHeader
-			combined.WriteString(header + "\n")
-		} else if currentHeader != header {
-			return nil, fmt.Errorf("loan detail part %03d has inconsistent header", number)
-		}
-		for _, line := range lines[1:] {
-			line = strings.TrimRight(line, "\r")
-			if strings.TrimSpace(line) != "" {
-				combined.WriteString(line + "\n")
+		if number == 1 {
+			combined.WriteString(strings.Join(header, "|"))
+			combined.WriteByte('\n')
+			headerSet = make(map[string]struct{}, len(header))
+			for _, value := range header {
+				headerSet[value] = struct{}{}
+			}
+		} else {
+			if len(header) != len(headerSet) {
+				return nil, fmt.Errorf("loan detail part %03d has inconsistent header", number)
+			}
+			for _, value := range header {
+				if _, ok := headerSet[value]; !ok {
+					return nil, fmt.Errorf("loan detail part %03d has inconsistent header", number)
+				}
 			}
 		}
-		parts++
+		if newline := bytes.IndexByte(part, '\n'); newline >= 0 {
+			combined.Write(part[newline+1:])
+		}
 	}
-	if parts == 0 {
-		return nil, fmt.Errorf("mandatory loan detail report is unavailable")
-	}
-	return combined.Bytes(), nil
+	return []byte(combined.String()), nil
+}
+
+var dnColumns = []string{
+	"cif_no", "cif_alternate_no", "customer_type", "customer_name", "idtype", "identity_number",
+	"mother_maiden_name", "birth_date", "tax_id", "management_name", "management_identity", "address1",
+	"citydati2", "phone_no", "debtor_type",
 }
 
 type customer struct {
@@ -257,54 +237,118 @@ type customer struct {
 	ManagementName, ManagementIdentity, Address, Dati2, Phone, DebtorType                     string
 }
 
-func parseCustomers(body []byte) (map[string]customer, error) {
+func parseCustomers(body []byte) ([]customer, map[string]struct{}, error) {
 	table, err := parseTable(body)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	if err := table.require("cif_no", "customer_type", "customer_name", "idtype", "identity_number", "birth_date", "address1", "citydati2", "debtor_type"); err != nil {
-		return nil, err
+	if err := table.require(dnColumns...); err != nil {
+		return nil, nil, err
 	}
-	customers := make(map[string]customer, len(table.rows))
+	indexes := make(map[string]int, len(dnColumns))
+	for _, column := range dnColumns {
+		indexes[column] = table.index(column)
+	}
+	rows := make([]customer, 0, len(table.rows))
+	seen := make(map[string]struct{}, len(table.rows))
 	for _, row := range table.rows {
-		value := customerFromRow(row)
-		if value.CIF == "" {
-			return nil, fmt.Errorf("customer row has empty CIF")
+		cif := strings.TrimSpace(valueAt(row, indexes["cif_no"]))
+		if cif == "" {
+			continue
 		}
-		if existing, duplicate := customers[value.CIF]; duplicate && existing != value {
-			return nil, fmt.Errorf("conflicting customer rows for CIF %s", value.CIF)
+		if _, duplicate := seen[cif]; duplicate {
+			continue
 		}
-		customers[value.CIF] = value
+		seen[cif] = struct{}{}
+		rows = append(rows, customer{
+			CIF: cif, AlternateCIF: valueAt(row, indexes["cif_alternate_no"]), Type: valueAt(row, indexes["customer_type"]),
+			Name: valueAt(row, indexes["customer_name"]), IdentityType: valueAt(row, indexes["idtype"]),
+			IdentityNumber: valueAt(row, indexes["identity_number"]), MotherName: valueAt(row, indexes["mother_maiden_name"]),
+			BirthDate: valueAt(row, indexes["birth_date"]), TaxID: valueAt(row, indexes["tax_id"]),
+			ManagementName: valueAt(row, indexes["management_name"]), ManagementIdentity: valueAt(row, indexes["management_identity"]),
+			Address: valueAt(row, indexes["address1"]), Dati2: valueAt(row, indexes["citydati2"]),
+			Phone: valueAt(row, indexes["phone_no"]), DebtorType: valueAt(row, indexes["debtor_type"]),
+		})
 	}
-	return customers, nil
+	return rows, seen, nil
 }
 
-func customerFromRow(row map[string]string) customer {
-	return customer{
-		CIF: field(row, "cif_no", "cifno"), AlternateCIF: field(row, "cif_alternate_no", "cif_alt_no"), Type: field(row, "customer_type"),
-		Name: field(row, "customer_name", "name"), IdentityType: field(row, "idtype", "identity_type"), IdentityNumber: field(row, "identity_number"),
-		MotherName: field(row, "mother_maiden_name"), BirthDate: field(row, "birth_date"), TaxID: field(row, "tax_id", "npwp"),
-		ManagementName: field(row, "management_name"), ManagementIdentity: field(row, "management_identity"), Address: field(row, "address1", "address"),
-		Dati2: field(row, "citydati2", "dati2"), Phone: field(row, "phone_no", "phone"), DebtorType: field(row, "debtor_type"),
+func (generator *Generator) buildDN(ctx context.Context, customers []customer) ([]string, error) {
+	rows := make([]string, 0, len(customers))
+	for _, value := range customers {
+		individual := strings.TrimSpace(value.Type) == "Perorangan"
+		debtorType := "9002"
+		if !individual {
+			debtorType = strings.TrimSpace(value.DebtorType)
+			if !isValidGolonganDebitur(debtorType) {
+				fallback, err := generator.debtors.DebtorTypeByAlternateCIF(ctx, value.AlternateCIF)
+				if err != nil || fallback == "" || fallback == "0002" {
+					debtorType = "4599"
+				} else {
+					debtorType = fallback
+				}
+			}
+		}
+		managementIdentity := cleanAlamat(value.ManagementIdentity)
+		if !individual && managementIdentity == "" {
+			managementIdentity = strings.Repeat("0", 16)
+		}
+		dati2 := normalizeDati2(value.Dati2)
+		identityNumber := strings.TrimSpace(value.IdentityNumber)
+		if individual && identityNumber == "" {
+			identityNumber = strings.Repeat("0", 16)
+		}
+		identityNumber = strings.ReplaceAll(identityNumber, " ", "")
+		if managementDebtorTypes[debtorType] {
+			identityNumber = ""
+			if managementIdentity == "" {
+				managementIdentity = strings.Repeat("0", 16)
+			}
+		}
+		mother := cleanAlamat(strings.TrimSpace(value.MotherName))
+		if individual && mother == "" {
+			mother = "IBU KANDUNG"
+		}
+		identityType := strings.TrimSpace(value.IdentityType)
+		if !slices.Contains([]string{"KTP", "PAS", "KTS"}, identityType) {
+			identityType = "LN"
+		}
+		if !individual {
+			identityType = ""
+		}
+		birthDate := strings.ReplaceAll(value.BirthDate, "-", "")
+		if !individual {
+			birthDate = ""
+		}
+		managementName := strings.TrimSpace(value.ManagementName)
+		if !individual && managementName == "" {
+			managementName = "BAPAK"
+		}
+		rows = append(rows, strings.Join([]string{
+			"D", value.CIF, cleanAlamat(value.Name), identityType, identityNumber, mother, birthDate,
+			valueIf(individual, value.TaxID, ""), managementName, valueIf(individual, "", "LN"), managementIdentity,
+			cleanAlamat(value.Address), valueIf(dati2 == "", "0000", dati2), valueIf(individual, "WNI", ""),
+			cleanAlamat(value.Phone), "1", "N", "20", debtorType,
+		}, "|"))
 	}
+	return rows, nil
 }
 
-func (generator *Generator) completeMissingCustomers(ctx context.Context, customers map[string]customer, needed map[string]struct{}) error {
+func (generator *Generator) completeMissingDN(ctx context.Context, seen, needed map[string]struct{}) ([]string, error) {
 	missing := make([]string, 0)
 	for cif := range needed {
-		if cif != "" {
-			if _, ok := customers[cif]; !ok {
-				missing = append(missing, cif)
-			}
+		if _, ok := seen[cif]; !ok {
+			seen[cif] = struct{}{}
+			missing = append(missing, cif)
 		}
 	}
 	if len(missing) == 0 {
-		return nil
+		return nil, nil
 	}
 	type result struct {
-		cif   string
-		value customer
-		err   error
+		cif  string
+		line string
+		err  error
 	}
 	work := make(chan string)
 	results := make(chan result, len(missing))
@@ -315,15 +359,11 @@ func (generator *Generator) completeMissingCustomers(ctx context.Context, custom
 			defer wait.Done()
 			for cif := range work {
 				data, err := generator.cifs.GetCIF(ctx, cif)
-				row := make(map[string]string, len(data))
-				for key, raw := range data {
-					row[canonical(key)] = strings.TrimSpace(fmt.Sprint(raw))
+				line := ""
+				if err == nil {
+					line, err = generator.buildLiveDN(ctx, data)
 				}
-				value := customerFromRow(row)
-				if value.CIF == "" {
-					value.CIF = cif
-				}
-				results <- result{cif: cif, value: value, err: err}
+				results <- result{cif: cif, line: line, err: err}
 			}
 		}()
 	}
@@ -338,6 +378,7 @@ func (generator *Generator) completeMissingCustomers(ctx context.Context, custom
 		}
 	}()
 	go func() { wait.Wait(); close(results) }()
+	rows := make([]string, 0, len(missing))
 	var firstError error
 	for result := range results {
 		if result.err != nil {
@@ -346,283 +387,236 @@ func (generator *Generator) completeMissingCustomers(ctx context.Context, custom
 			}
 			continue
 		}
-		customers[result.cif] = result.value
+		rows = append(rows, result.line)
 	}
 	if firstError != nil {
-		return firstError
+		return nil, firstError
 	}
 	if ctx.Err() != nil {
-		return ctx.Err()
-	}
-	return nil
-}
-
-func (generator *Generator) buildDN(ctx context.Context, customers map[string]customer) ([]string, error) {
-	rows := make([]string, 0, len(customers))
-	for _, value := range customers {
-		individual := strings.EqualFold(strings.TrimSpace(value.Type), "Perorangan")
-		if strings.TrimSpace(value.CIF) == "" || strings.TrimSpace(value.Name) == "" || strings.TrimSpace(value.Type) == "" {
-			return nil, fmt.Errorf("mandatory customer identity is missing for CIF %s", value.CIF)
-		}
-		debtorType := strings.TrimSpace(value.DebtorType)
-		if individual {
-			if !validDebtorType(debtorType) {
-				debtorType = "9002"
-			}
-		} else if !validDebtorType(debtorType) || debtorType == "0002" {
-			fallback, err := generator.debtors.DebtorTypeByAlternateCIF(ctx, value.AlternateCIF)
-			if err != nil && !errors.Is(err, loan.ErrNotFound) {
-				return nil, fmt.Errorf("resolve debtor type for CIF %s: %w", value.CIF, err)
-			}
-			debtorType = strings.TrimSpace(fallback)
-			if !validDebtorType(debtorType) || debtorType == "0002" {
-				debtorType = "4599"
-			}
-		}
-		identityType := strings.ToUpper(strings.TrimSpace(value.IdentityType))
-		identityNumber := clean(value.IdentityNumber)
-		mother := clean(value.MotherName)
-		managementName := clean(value.ManagementName)
-		managementIdentity := clean(value.ManagementIdentity)
-		managementIdentityType := ""
-		citizenship := ""
-		if individual {
-			if identityType != "KTP" && identityType != "PAS" && identityType != "KTS" {
-				identityType = "LN"
-			}
-			if identityNumber == "" {
-				identityNumber = strings.Repeat("0", 16)
-			}
-			if mother == "" {
-				mother = "IBU KANDUNG"
-			}
-			citizenship = "WNI"
-		} else {
-			identityType = ""
-			managementIdentityType = "LN"
-			if managementIdentity == "" {
-				managementIdentity = strings.Repeat("0", 16)
-			}
-			if managementName == "" {
-				managementName = "BAPAK"
-			}
-		}
-		if managementDebtorTypes[debtorType] {
-			identityNumber = ""
-			if managementIdentity == "" {
-				managementIdentity = strings.Repeat("0", 16)
-			}
-		}
-		dati2 := normalizeDati2(value.Dati2)
-		birthDate, err := optionalDate(value.BirthDate, generator.location)
-		if err != nil {
-			return nil, fmt.Errorf("invalid birth date for CIF %s", value.CIF)
-		}
-		taxID := ""
-		if individual {
-			taxID = clean(value.TaxID)
-		}
-		rows = append(rows, strings.Join([]string{
-			"D", clean(value.CIF), clean(value.Name), identityType, identityNumber, mother, birthDate, taxID,
-			managementName, managementIdentityType, managementIdentity, clean(value.Address), dati2, citizenship,
-			clean(value.Phone), "1", "N", "20", debtorType,
-		}, "|"))
+		return nil, ctx.Err()
 	}
 	return rows, nil
 }
 
+func (generator *Generator) buildLiveDN(ctx context.Context, data fincloud.CIFData) (string, error) {
+	individual := stringValue(data["jenisnasabah"]) == "Perorangan"
+	identityType := ""
+	if individual {
+		identityType = stringValue(data["jenisidentitas"])
+		if !slices.Contains([]string{"KTP", "PAS", "KTS"}, identityType) {
+			identityType = "LN"
+		}
+	}
+	debtorType := "9002"
+	if !individual {
+		debtorType = stringValue(data["datauntuksid_golongandebitur"])
+		if !isValidGolonganDebitur(debtorType) {
+			fallback, err := generator.debtors.DebtorTypeByAlternateCIF(ctx, stringValue(data["noalt"]))
+			if err != nil || fallback == "" || fallback == "0002" {
+				debtorType = "4599"
+			} else {
+				debtorType = fallback
+			}
+		}
+	}
+	identityNumber := stringValue(data["perorangan_noktp"])
+	if individual && identityNumber == "" {
+		identityNumber = strings.Repeat("0", 16)
+	}
+	mother := cleanAlamat(stringValue(data["perorangan_namaibukandung"]))
+	if individual && mother == "" {
+		mother = "IBU KANDUNG"
+	}
+	birthDate := strings.SplitN(objectString(data["dataktp_tgllahir"], "date"), " ", 2)[0]
+	birthDate = strings.ReplaceAll(birthDate, "-", "")
+	if !individual {
+		birthDate = ""
+	}
+	managementName, managementIdentity := "", ""
+	if !individual {
+		if management, ok := firstObject(data["datapengurusperusahaan"]); ok {
+			managementName = cleanAlamat(stringValue(management["nama"]))
+			managementIdentity = cleanAlamat(stringValue(management["noktp"]))
+			if managementIdentity == "" {
+				managementIdentity = strings.Repeat("0", 16)
+			}
+		} else {
+			managementName = "BAPAK"
+		}
+	}
+	if managementDebtorTypes[debtorType] {
+		identityNumber = ""
+		if managementIdentity == "" {
+			managementIdentity = strings.Repeat("0", 16)
+		}
+	}
+	dati2 := normalizeDati2(stringValue(data["datauntuksid_dati2debitur"]))
+	return strings.Join([]string{
+		"D", stringValue(data["id"]), stringValue(data["namanasabah"]), identityType, identityNumber, mother, birthDate,
+		valueIf(individual, stringValue(data["profilresiko_identitasnasabah"]), ""), managementName,
+		valueIf(individual, "", "LN"), managementIdentity, cleanAlamat(stringValue(data["dataalamat_ktp_alamat1"])),
+		dati2, valueIf(individual, "WNI", ""), cleanAlamat(stringValue(data["dataalamat_rumah_nohp"])),
+		"1", "N", "20", debtorType,
+	}, "|"), nil
+}
+
 var managementDebtorTypes = map[string]bool{"8139": true, "0070": true, "2090": true, "7174": true, "4120": true, "4599": true}
 
-// ponytail: numeric validation until owner supplies authoritative exhaustive LPS code sets.
-func validDebtorType(value string) bool { return digits(value, 4) }
 func normalizeDati2(value string) string {
-	value = strings.TrimSpace(value)
-	if digits(value, 3) {
+	if len(value) == 3 {
 		value = "0" + value
 	}
-	if !digits(value, 4) {
+	if !isValidDati2(value) {
 		return "0000"
 	}
 	return value
 }
 
 type table struct {
-	headers map[string]struct{}
-	rows    []map[string]string
+	header []string
+	rows   [][]string
 }
 
 func parseTable(body []byte) (table, error) {
-	body = bytes.TrimPrefix(body, []byte{0xEF, 0xBB, 0xBF})
-	if len(bytes.TrimSpace(body)) == 0 {
-		return table{}, fmt.Errorf("report is empty")
-	}
-	firstLine := body
-	if index := bytes.IndexByte(body, '\n'); index >= 0 {
-		firstLine = body[:index]
-	}
-	delimiter := ','
-	if bytes.Count(firstLine, []byte("|")) > bytes.Count(firstLine, []byte(",")) {
-		delimiter = '|'
-	}
-	reader := csv.NewReader(bytes.NewReader(body))
-	reader.Comma = delimiter
-	reader.FieldsPerRecord = -1
-	headers, err := reader.Read()
+	reader := newCSVReader(body)
+	header, err := reader.Read()
 	if err != nil {
+		if errors.Is(err, io.EOF) {
+			return table{}, errors.New("empty CSV file")
+		}
 		return table{}, err
 	}
-	result := table{headers: make(map[string]struct{}, len(headers)), rows: make([]map[string]string, 0)}
-	canonicalHeaders := make([]string, len(headers))
-	for index, header := range headers {
-		canonicalHeaders[index] = canonical(header)
-		result.headers[canonicalHeaders[index]] = struct{}{}
-	}
+	result := table{header: header}
 	for {
-		record, err := reader.Read()
-		if err == io.EOF {
+		row, err := reader.Read()
+		if errors.Is(err, io.EOF) {
 			break
 		}
 		if err != nil {
 			return table{}, err
 		}
-		row := make(map[string]string, len(headers))
-		nonempty := false
-		for index, header := range canonicalHeaders {
-			if index < len(record) {
-				row[header] = strings.TrimSpace(record[index])
-				nonempty = nonempty || row[header] != ""
-			}
-		}
-		if nonempty {
-			result.rows = append(result.rows, row)
-		}
+		result.rows = append(result.rows, row)
 	}
 	return result, nil
 }
 
+func newCSVReader(body []byte) *csv.Reader {
+	reader := csv.NewReader(bytes.NewReader(body))
+	reader.Comma = '|'
+	reader.FieldsPerRecord = -1
+	reader.LazyQuotes = true
+	reader.TrimLeadingSpace = true
+	return reader
+}
+
+func (value table) index(name string) int {
+	for index, header := range value.header {
+		if strings.TrimSpace(header) == name {
+			return index
+		}
+	}
+	return -1
+}
+
 func (value table) require(columns ...string) error {
 	for _, column := range columns {
-		if _, ok := value.headers[column]; !ok {
-			return fmt.Errorf("required column %q is missing", column)
+		if value.index(column) == -1 {
+			return errors.New("missing column in CSV: " + column)
 		}
 	}
 	return nil
 }
 
-func canonical(value string) string {
-	value = strings.TrimSpace(strings.ToLower(value))
-	var output strings.Builder
-	underscore := false
-	for _, character := range value {
-		if unicode.IsLetter(character) || unicode.IsDigit(character) {
-			output.WriteRune(character)
-			underscore = false
-		} else if !underscore && output.Len() > 0 {
-			output.WriteByte('_')
-			underscore = true
-		}
-	}
-	return strings.Trim(output.String(), "_")
-}
-
-func field(row map[string]string, names ...string) string {
-	for _, name := range names {
-		if value, ok := row[name]; ok {
-			return strings.TrimSpace(value)
-		}
-	}
-	return ""
-}
-
-func parseAccountMoney(body []byte, accountColumns, valueColumns []string) (map[string]loan.Money, error) {
+func transposeTable(body []byte, keyColumn string) (map[string]map[string]string, error) {
 	table, err := parseTable(body)
 	if err != nil {
 		return nil, err
 	}
-	result := make(map[string]loan.Money, len(table.rows))
+	keyIndex := table.index(keyColumn)
+	if keyIndex == -1 {
+		return nil, errors.New("missing column in CSV: " + keyColumn)
+	}
+	result := make(map[string]map[string]string, len(table.rows))
 	for _, row := range table.rows {
-		account := field(row, accountColumns...)
-		raw := field(row, valueColumns...)
-		if account == "" || raw == "" {
-			return nil, fmt.Errorf("account or monetary value is missing")
+		key := valueAt(row, keyIndex)
+		if _, ok := result[key]; !ok {
+			result[key] = make(map[string]string)
 		}
-		value, err := parseMoney(raw)
-		if err != nil {
-			return nil, err
-		}
-		if existing, duplicate := result[account]; duplicate && existing.Cmp(value) != 0 {
-			return nil, fmt.Errorf("conflicting monetary rows for account %s", account)
-		}
-		result[account] = value
-	}
-	return result, nil
-}
-
-func parseOptionalAccountDates(body []byte) (map[string]string, error) {
-	if len(bytes.TrimSpace(body)) == 0 {
-		return map[string]string{}, nil
-	}
-	table, err := parseTable(body)
-	if err != nil {
-		return nil, err
-	}
-	result := make(map[string]string)
-	for _, row := range table.rows {
-		account := field(row, "destination_account", "account_destination", "rekening_tujuan", "to_account")
-		date := field(row, "end_date", "tanggal_akhir", "maturity_date")
-		if account != "" && date != "" {
-			result[account] = date
+		for index, name := range table.header {
+			result[key][name] = valueAt(row, index)
 		}
 	}
 	return result, nil
 }
 
-func parseMoney(raw string) (loan.Money, error) {
-	normalized, err := fincloud.NormalizeDecimal(raw)
-	if err != nil {
-		return loan.Money{}, err
+func valueAt(row []string, index int) string {
+	if index < 0 || index >= len(row) {
+		return ""
 	}
-	return loan.ParseMoney(normalized)
+	return row[index]
 }
 
-func requiredDate(raw string, location *time.Location) (string, error) {
-	value, err := parseDate(raw, location)
-	if err != nil {
-		return "", err
+func stringValue(value any) string {
+	if value == nil {
+		return ""
 	}
-	return value.Format("20060102"), nil
+	if text, ok := value.(string); ok {
+		return text
+	}
+	return fmt.Sprint(value)
 }
 
-func optionalDate(raw string, location *time.Location) (string, error) {
-	if strings.TrimSpace(raw) == "" {
-		return "", nil
+func objectString(value any, key string) string {
+	object, ok := value.(map[string]any)
+	if !ok {
+		return ""
 	}
-	return requiredDate(raw, location)
+	return stringValue(object[key])
 }
 
-func parseDate(raw string, location *time.Location) (time.Time, error) {
-	raw = strings.TrimSpace(raw)
-	if len(raw) >= 10 && raw[4] == '-' {
-		raw = raw[:10]
+func firstObject(value any) (map[string]any, bool) {
+	values, ok := value.([]any)
+	if !ok || len(values) == 0 {
+		return nil, false
 	}
-	for _, layout := range []string{"2006-01-02", "20060102", "02/01/2006"} {
-		if value, err := time.ParseInLocation(layout, raw, location); err == nil {
-			return value, nil
-		}
+	object, ok := values[0].(map[string]any)
+	if !ok {
+		object = map[string]any{}
 	}
-	return time.Time{}, fmt.Errorf("invalid date %q", raw)
+	return object, true
 }
 
-var repeatedSpace = regexp.MustCompile(`\s+`)
-
-func clean(value string) string {
-	var output strings.Builder
-	for _, character := range strings.TrimSpace(value) {
-		if unicode.IsLetter(character) || unicode.IsDigit(character) || strings.ContainsRune(" .,/&'-", character) {
-			output.WriteRune(character)
-		}
+func rowsBody(rows []string) string {
+	if len(rows) == 0 {
+		return ""
 	}
-	return repeatedSpace.ReplaceAllString(strings.TrimSpace(output.String()), " ")
+	return strings.Join(rows, "\n") + "\n"
+}
+
+func buildFileContent(input Input, count int, body string) []byte {
+	header := fmt.Sprintf("H|%s|%s|%s|%s|%d", input.ParticipantCode, input.ReportingDate, input.Period, input.Version, count)
+	if body == "" {
+		return []byte(header + "\n")
+	}
+	return []byte(header + "\n" + body)
+}
+
+func valueIf(condition bool, ifTrue, ifFalse string) string {
+	if condition {
+		return ifTrue
+	}
+	return ifFalse
+}
+
+var (
+	disallowedAddress = regexp.MustCompile(`[^0-9A-Za-z.,_'\/()& -]`)
+	repeatedSpaces    = regexp.MustCompile(` +`)
+)
+
+func cleanAlamat(value string) string {
+	value = disallowedAddress.ReplaceAllString(value, "")
+	value = repeatedSpaces.ReplaceAllString(value, " ")
+	return strings.TrimSpace(value)
 }
 
 func digits(value string, length int) bool {

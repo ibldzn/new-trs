@@ -1,198 +1,211 @@
 package lps
 
 import (
+	"errors"
 	"fmt"
 	"strconv"
 	"strings"
-	"time"
-
-	"github.com/ibldzn/trs/internal/loan"
 )
 
-func buildDSN(
-	savingsBody, depositBody []byte,
-	depositBalances map[string]loan.Money,
-	standing map[string]string,
-	reportingRate loan.Money,
-	reportingDate time.Time,
-	rateAt func(time.Time) (loan.Money, error),
-	location *time.Location,
-) ([]string, map[string]struct{}, error) {
-	rows := make([]string, 0)
-	cifs := make(map[string]struct{})
+var dsnColumns = []string{
+	"cif_no", "acc_no", "product", "start_date", "interest_rate", "nominal", "blocked_nominal", "end_date",
+}
+
+func buildDSN(savingsBody, depositBody, balanceBody, standingBody []byte, reportingDate string, rates []RateEntry) ([]string, map[string]struct{}, error) {
 	savings, err := parseTable(savingsBody)
 	if err != nil {
 		return nil, nil, fmt.Errorf("parse savings: %w", err)
 	}
-	for _, row := range savings.rows {
-		cif := field(row, "cif_no", "cifno")
-		account := field(row, "account_number", "account_no", "savings_account_no", "rekening")
-		product := field(row, "product_id", "product")
-		startDate, err := requiredDate(field(row, "start_date", "open_date"), location)
-		if err != nil || cif == "" || account == "" || product == "" {
-			return nil, nil, fmt.Errorf("savings row missing mandatory identity/date")
-		}
-		interestRate, err := requiredMoneyField(row, "interest_rate", "rate")
-		if err != nil {
-			return nil, nil, fmt.Errorf("savings %s interest rate: %w", account, err)
-		}
-		nominal, err := requiredMoneyField(row, "nominal", "balance", "current_balance")
-		if err != nil {
-			return nil, nil, fmt.Errorf("savings %s nominal: %w", account, err)
-		}
-		blocked, err := optionalMoneyField(row, "blocked_nominal", "blocked_amount")
-		if err != nil {
-			return nil, nil, fmt.Errorf("savings %s blocked nominal: %w", account, err)
-		}
-		owners := field(row, "owners", "owner_count", "number_of_owners")
-		if owners == "" {
-			owners = "1"
-		}
-		fundStatus := "S"
-		for _, prefix := range []string{"103", "114", "115", "116", "117", "118"} {
-			if strings.HasPrefix(product, prefix) {
-				fundStatus = "B"
-				break
-			}
-		}
-		endDate := ""
-		if fundStatus == "B" {
-			raw := standing[account]
-			if raw == "" {
-				endDate = reportingDate.Format("20060102")
-			} else if endDate, err = requiredDate(raw, location); err != nil {
-				return nil, nil, fmt.Errorf("savings %s Standing Order date: %w", account, err)
-			}
-		} else if raw := field(row, "end_date", "maturity_date"); raw != "" {
-			endDate, err = requiredDate(raw, location)
-			if err != nil {
-				return nil, nil, fmt.Errorf("savings %s end date: %w", account, err)
-			}
-		}
-		blockReason := ""
-		if blocked.IsPositive() {
-			blockReason = "99"
-		}
-		rows = append(rows, strings.Join([]string{
-			"D", "R", owners, cif, "TAB", account, fundStatus, startDate, "1", interestRate.Format(2), "0", reportingRate.Format(2), "1",
-			nominal.Format(2), blocked.Format(2), blockReason, "0", "", endDate,
-		}, "|"))
-		cifs[cif] = struct{}{}
-	}
-
 	deposits, err := parseTable(depositBody)
 	if err != nil {
 		return nil, nil, fmt.Errorf("parse deposits: %w", err)
 	}
+	for _, column := range dsnColumns {
+		savingsIndex := savings.index(column)
+		if savingsIndex == -1 {
+			return nil, nil, errors.New("missing column in savings CSV: " + column)
+		}
+		depositIndex := deposits.index(column)
+		if depositIndex == -1 {
+			return nil, nil, errors.New("missing column in time deposit CSV: " + column)
+		}
+		if savingsIndex != depositIndex {
+			return nil, nil, errors.New("column index mismatch between savings and time deposit CSV for column: " + column)
+		}
+	}
+
+	balances, err := transposeTable(balanceBody, "Account No")
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse deposit balances: %w", err)
+	}
+	standing, err := transposeTable(standingBody, "Destination Account Number")
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse Standing Order source: %w", err)
+	}
+
+	indexes := make(map[string]int, len(dsnColumns))
+	for _, column := range dsnColumns {
+		indexes[column] = savings.index(column)
+	}
+	rateByDate := make(map[string]float64, len(rates))
+	for _, entry := range rates {
+		rateByDate[entry.Date.Format("2006-01-02")] = entry.BPR
+	}
+	reportingRateKey := reportingDate
+	if parsed, err := parseLPSRateDate(reportingDate); err == nil {
+		reportingRateKey = parsed.Format("2006-01-02")
+	}
+
+	rows := make([]string, 0, len(savings.rows)+len(deposits.rows))
+	cifs := make(map[string]struct{})
+	for _, row := range savings.rows {
+		cif := strings.TrimSpace(valueAt(row, indexes["cif_no"]))
+		if cif == "" {
+			continue
+		}
+		cifs[cif] = struct{}{}
+		account := strings.TrimSpace(valueAt(row, indexes["acc_no"]))
+		if account == "" {
+			continue
+		}
+
+		fundStatus := "S"
+		for _, prefix := range []string{"103", "114", "115", "116", "117", "118"} {
+			if strings.HasPrefix(valueAt(row, indexes["product"]), prefix) {
+				fundStatus = "B"
+				break
+			}
+		}
+		endDate := reportingDate
+		if fundStatus == "B" {
+			endDate = standing[account]["End Date"]
+			if endDate == "" {
+				endDate = reportingDate
+			}
+		}
+		blocked := stringToFloat(valueAt(row, indexes["blocked_nominal"]))
+		blockReason := ""
+		if blocked > 0 {
+			blockReason = "99"
+		}
+		interestRateRaw := valueAt(row, indexes["interest_rate"])
+		interestRate, err := parsePercentage(interestRateRaw)
+		if err != nil {
+			return nil, nil, fmt.Errorf("invalid interest rate %q for account %s: %w", interestRateRaw, valueAt(row, indexes["acc_no"]), err)
+		}
+		nominal := stringToFloat(valueAt(row, indexes["nominal"]))
+		rows = append(rows, strings.Join([]string{
+			"D", "R", "", cif, "TAB", valueAt(row, indexes["acc_no"]), fundStatus,
+			strings.ReplaceAll(reportingDate, "-", ""), "1", fmt.Sprintf("%.2f", interestRate), "0",
+			fmt.Sprintf("%.2f", rateByDate[reportingRateKey]), "1", fmt.Sprintf("%d", int(nominal)),
+			fmt.Sprintf("%d", int(blocked)), blockReason, "0", "", strings.ReplaceAll(endDate, "-", ""),
+		}, "|"))
+	}
+
 	for _, row := range deposits.rows {
-		cif := field(row, "cif_no", "cifno")
-		account := field(row, "account_number", "account_no", "deposit_account", "rekening")
-		startRaw := field(row, "start_date", "open_date")
-		start, err := parseDate(startRaw, location)
-		if err != nil || cif == "" || account == "" {
-			return nil, nil, fmt.Errorf("deposit row missing mandatory identity/date")
+		cif := strings.TrimSpace(valueAt(row, indexes["cif_no"]))
+		if cif == "" {
+			continue
 		}
-		startDate := start.Format("20060102")
-		endDate, err := requiredDate(field(row, "end_date", "maturity_date"), location)
+		cifs[cif] = struct{}{}
+		account := strings.TrimSpace(valueAt(row, indexes["acc_no"]))
+		if account == "" {
+			continue
+		}
+		startDate := strings.TrimSpace(valueAt(row, indexes["start_date"]))
+		lpsRate := rateByDate[startDate]
+		interestRateRaw := valueAt(row, indexes["interest_rate"])
+		interestRate, err := parsePercentage(interestRateRaw)
 		if err != nil {
-			return nil, nil, fmt.Errorf("deposit %s maturity date: %w", account, err)
+			return nil, nil, fmt.Errorf("invalid interest rate %q for account %s: %w", interestRateRaw, valueAt(row, indexes["acc_no"]), err)
 		}
-		interestRate, err := requiredMoneyField(row, "interest_rate", "rate")
-		if err != nil {
-			return nil, nil, fmt.Errorf("deposit %s interest rate: %w", account, err)
-		}
-		nominal, err := requiredMoneyField(row, "nominal", "balance", "current_balance")
-		if err != nil {
-			return nil, nil, fmt.Errorf("deposit %s nominal: %w", account, err)
-		}
-		lpsRate, err := rateAt(start)
-		if err != nil {
-			return nil, nil, fmt.Errorf("deposit %s LPS rate: %w", account, err)
-		}
-		accrued, ok := depositBalances[account]
-		if !ok {
-			return nil, nil, fmt.Errorf("deposit %s missing accrued interest", account)
-		}
-		owners := field(row, "owners", "owner_count", "number_of_owners")
-		if owners == "" {
-			owners = "1"
+		nominal := stringToFloat(valueAt(row, indexes["nominal"]))
+		accrued := stringToFloat(balances[account]["Accrued Interest"])
+		lastAccrual := ""
+		if accrued > 0 {
+			lastAccrual = reportingDate
 		}
 		category := "1"
-		if interestRate.Cmp(lpsRate) > 0 {
+		if interestRate > lpsRate {
 			category = "2.B"
 		}
-		lastAccrual := ""
-		if accrued.IsPositive() {
-			lastAccrual = reportingDate.Format("20060102")
-		}
 		rows = append(rows, strings.Join([]string{
-			"D", "R", owners, cif, "DEP", account, "B", startDate, "1", interestRate.Format(2), "0", lpsRate.Format(2), category,
-			nominal.Format(2), "0", "", accrued.Format(2), lastAccrual, endDate,
+			"D", "R", "", cif, "DEP", account, "B", strings.ReplaceAll(startDate, "-", ""), "1",
+			fmt.Sprintf("%.2f", interestRate), "0", fmt.Sprintf("%.2f", lpsRate), category,
+			fmt.Sprintf("%d", int(nominal)), "0", "", fmt.Sprintf("%d", int(accrued)), lastAccrual,
+			strings.ReplaceAll(valueAt(row, indexes["end_date"]), "-", ""),
 		}, "|"))
-		cifs[cif] = struct{}{}
 	}
 	return rows, cifs, nil
 }
 
-func buildDK(body []byte, interestArrears map[string]loan.Money, location *time.Location) ([]string, map[string]struct{}, error) {
-	table, err := parseTable(body)
+func buildDK(body, detailBody []byte) ([]string, map[string]struct{}, error) {
+	loans, err := parseTable(body)
 	if err != nil {
 		return nil, nil, fmt.Errorf("parse loans: %w", err)
 	}
-	rows := make([]string, 0, len(table.rows))
+	columns := []string{"cifno", "loan_no", "collectibility", "credit_limit_effective", "outstanding", "principal_arrears", "start_date", "mature_date"}
+	if err := loans.require(columns...); err != nil {
+		return nil, nil, err
+	}
+	details, err := transposeTable(detailBody, "no_rekening")
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse loan details: %w", err)
+	}
+	indexes := make(map[string]int, len(columns))
+	for _, column := range columns {
+		indexes[column] = loans.index(column)
+	}
+	rows := make([]string, 0, len(loans.rows))
 	cifs := make(map[string]struct{})
-	for _, row := range table.rows {
-		cif := field(row, "cifno", "cif_no")
-		account := field(row, "loan_no", "loan_account_no", "account_number", "no_rekening")
-		collectability := field(row, "collectibility", "collectability", "bi_collectability")
-		value, err := strconv.Atoi(collectability)
-		if err != nil || value < 1 || value > 5 || cif == "" || account == "" {
-			return nil, nil, fmt.Errorf("loan row has invalid identity or collectability")
+	for _, row := range loans.rows {
+		cif := strings.TrimSpace(valueAt(row, indexes["cifno"]))
+		if cif == "" {
+			continue
 		}
-		plafond, err := requiredMoneyField(row, "credit_limit_effective", "credit_limit", "plafond")
-		if err != nil {
-			return nil, nil, fmt.Errorf("loan %s plafond: %w", account, err)
-		}
-		outstanding, err := requiredMoneyField(row, "outstanding", "loan_outstanding")
-		if err != nil {
-			return nil, nil, fmt.Errorf("loan %s outstanding: %w", account, err)
-		}
-		principalDue, err := requiredMoneyField(row, "principal_arrears", "tunggakan_pokok")
-		if err != nil {
-			return nil, nil, fmt.Errorf("loan %s principal arrears: %w", account, err)
-		}
-		interestDue, ok := interestArrears[account]
-		if !ok {
-			return nil, nil, fmt.Errorf("loan %s missing interest arrears", account)
-		}
-		startDate, err := requiredDate(field(row, "start_date"), location)
-		if err != nil {
-			return nil, nil, fmt.Errorf("loan %s start date: %w", account, err)
-		}
-		maturityDate, err := requiredDate(field(row, "mature_date", "maturity_date", "end_date"), location)
-		if err != nil {
-			return nil, nil, fmt.Errorf("loan %s maturity date: %w", account, err)
-		}
-		rows = append(rows, strings.Join([]string{
-			"D", cif, account, "03", collectability, plafond.Format(2), outstanding.Format(2), principalDue.Format(2), interestDue.Format(2), "300", startDate, maturityDate, "4",
-		}, "|"))
 		cifs[cif] = struct{}{}
+		account := strings.TrimSpace(valueAt(row, indexes["loan_no"]))
+		if account == "" {
+			continue
+		}
+		plafond := stringToFloat(valueAt(row, indexes["credit_limit_effective"]))
+		outstanding := stringToFloat(valueAt(row, indexes["outstanding"]))
+		principalArrears := stringToFloat(valueAt(row, indexes["principal_arrears"]))
+		interestArrears := stringToFloat(details[account]["tunggakan_bunga"])
+		rows = append(rows, strings.Join([]string{
+			"D", cif, account, "03", valueAt(row, indexes["collectibility"]), fmt.Sprintf("%d", int(plafond)),
+			fmt.Sprintf("%d", int(outstanding)), fmt.Sprintf("%d", int(principalArrears)), fmt.Sprintf("%d", int(interestArrears)),
+			"300", strings.ReplaceAll(valueAt(row, indexes["start_date"]), "-", ""),
+			strings.ReplaceAll(valueAt(row, indexes["mature_date"]), "-", ""), "4",
+		}, "|"))
 	}
 	return rows, cifs, nil
 }
 
-func requiredMoneyField(row map[string]string, names ...string) (loan.Money, error) {
-	raw := field(row, names...)
-	if raw == "" {
-		return loan.Money{}, fmt.Errorf("required monetary field is empty")
+func stringToFloat(value string) float64 {
+	parsed, err := strconv.ParseFloat(strings.ReplaceAll(value, ",", ""), 64)
+	if err != nil {
+		return 0
 	}
-	return parseMoney(raw)
+	return parsed
 }
 
-func optionalMoneyField(row map[string]string, names ...string) (loan.Money, error) {
-	raw := field(row, names...)
+func parsePercentage(value string) (float64, error) {
+	raw := strings.TrimSpace(value)
 	if raw == "" {
-		return loan.Money{}, nil
+		return 0, errors.New("empty percentage")
 	}
-	return parseMoney(raw)
+	hasPercent := strings.HasSuffix(raw, "%")
+	if hasPercent {
+		raw = strings.TrimSpace(strings.TrimSuffix(raw, "%"))
+	}
+	raw = strings.ReplaceAll(raw, ",", ".")
+	parsed, err := strconv.ParseFloat(raw, 64)
+	if err != nil {
+		return 0, err
+	}
+	if !hasPercent && parsed > 0 && parsed < 1 {
+		parsed *= 100
+	}
+	return parsed, nil
 }

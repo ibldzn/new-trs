@@ -1,0 +1,6 @@
+cif_no|cif_alternate_no|customer_type|customer_name|idtype|identity_number|mother_maiden_name|birth_date|tax_id|management_name|management_identity|address1|citydati2|phone_no|debtor_type
+C1|ALT1|Perorangan|Alice_(One)#|OTHER|12 34|Mom_(One)#|1980-01-02|NPWP#1|||Jl. A_(1)#|9998|08_(1)#|4111
+C1|DUPLICATE|Perorangan|Duplicate|||Mother|1990-01-01||||Elsewhere|0100||9002
+C2|ALT2|Badan Usaha|Corp & Co|KTP|9999|Company Mother|2000-01-01||||Office (A)_#|0100|021_(2)#|1234
+C3|ALT3|Badan Usaha|Third Corp|PAS|8888||2001-02-03||||Third Address|0102|022|4111
+

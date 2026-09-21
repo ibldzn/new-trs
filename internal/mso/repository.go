@@ -34,13 +34,13 @@ func (repository *Repository) DebtorTypeByAlternateCIF(ctx context.Context, cif 
 		return "", errors.Join(loan.ErrMSOUnavailable, fmt.Errorf("MSO_DEBTOR_TYPE_QUERY must be a SELECT with one placeholder"))
 	}
 	var debtorType string
-	if err := repository.database.GetContext(ctx, &debtorType, repository.debtorTypeQuery, strings.TrimSpace(cif)); err != nil {
+	if err := repository.database.GetContext(ctx, &debtorType, repository.debtorTypeQuery, cif); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return "", loan.ErrNotFound
 		}
 		return "", errors.Join(loan.ErrMSOUnavailable, err)
 	}
-	return strings.TrimSpace(debtorType), nil
+	return debtorType, nil
 }
 
 func validReadQuery(query string) bool {

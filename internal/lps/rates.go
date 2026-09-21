@@ -5,16 +5,18 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
-
-	"github.com/ibldzn/trs/internal/loan"
 )
 
 const dailyRateURL = "https://apps.lps.go.id/LPSRate/ListHarian"
+
+type RateEntry struct {
+	Date time.Time
+	BPR  float64
+}
 
 type HTTPRateProvider struct {
 	http *http.Client
@@ -23,97 +25,70 @@ type HTTPRateProvider struct {
 
 func NewHTTPRateProvider(httpClient *http.Client) *HTTPRateProvider {
 	if httpClient == nil {
-		httpClient = &http.Client{Timeout: 20 * time.Second}
+		httpClient = &http.Client{Timeout: 30 * time.Second}
 	}
 	return &HTTPRateProvider{http: httpClient, url: dailyRateURL}
 }
 
-func (provider *HTTPRateProvider) RateAt(ctx context.Context, date time.Time) (loan.Money, error) {
-	form := url.Values{"tanggal": {date.Format("2006-01-02")}}
+func (provider *HTTPRateProvider) Rates(ctx context.Context, asOf time.Time) ([]RateEntry, error) {
+	form := url.Values{}
+	form.Set("sort", `[{"selector":"startDate","desc":true}]`)
+	form.Set("filter", fmt.Sprintf(`["startDate","<=","%s"]`, asOf.Format("2006-01-02")))
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, provider.url, strings.NewReader(form.Encode()))
 	if err != nil {
-		return loan.Money{}, err
+		return nil, err
 	}
 	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	request.Header.Set("Accept", "application/json")
+	request.Header.Set("User-Agent", "Mozilla/5.0 (Macintosh; Intel Mac OS X 10.15; rv:149.0) Gecko/20100101 Firefox/149.0")
+	request.Header.Set("Accept", "application/json, text/javascript, */*; q=0.01")
+	request.Header.Set("Accept-Language", "en-US,en;q=0.9")
+	request.Header.Set("X-Requested-With", "XMLHttpRequest")
+	request.Header.Set("Referer", "https://apps.lps.go.id/lpsrate/harian")
+
 	response, err := provider.http.Do(request)
 	if err != nil {
-		return loan.Money{}, fmt.Errorf("LPS rate request: %w", err)
+		return nil, fmt.Errorf("LPS rate request: %w", err)
 	}
 	defer response.Body.Close()
-	if response.StatusCode < 200 || response.StatusCode >= 300 {
-		return loan.Money{}, fmt.Errorf("LPS rate request returned HTTP %d", response.StatusCode)
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		return nil, fmt.Errorf("LPS rate request failed: %s", response.Status)
 	}
-	body, err := io.ReadAll(io.LimitReader(response.Body, (2<<20)+1))
-	if err != nil {
-		return loan.Money{}, err
+
+	var payload struct {
+		Data []struct {
+			StartDate string  `json:"startDate"`
+			RateBPR   float64 `json:"rateBPR"`
+		} `json:"data"`
 	}
-	if len(body) > 2<<20 {
-		return loan.Money{}, fmt.Errorf("LPS rate response exceeds size limit")
+	if err := json.NewDecoder(response.Body).Decode(&payload); err != nil {
+		return nil, fmt.Errorf("decode LPS rate response: %w", err)
 	}
-	var payload any
-	decoder := json.NewDecoder(strings.NewReader(string(body)))
-	decoder.UseNumber()
-	if err := decoder.Decode(&payload); err != nil {
-		return loan.Money{}, fmt.Errorf("decode LPS rate response: %w", err)
-	}
-	points := make([]ratePoint, 0)
-	if err := collectRatePoints(payload, &points, date.Location()); err != nil {
-		return loan.Money{}, err
-	}
-	var selected *ratePoint
-	for index := range points {
-		point := &points[index]
-		if point.date.After(date) {
+	entries := make([]RateEntry, 0, len(payload.Data))
+	for index, row := range payload.Data {
+		startDate := strings.TrimSpace(row.StartDate)
+		if startDate == "" {
 			continue
 		}
-		if selected == nil || point.date.After(selected.date) {
-			selected = point
+		date, err := parseLPSRateDate(startDate)
+		if err != nil {
+			return nil, fmt.Errorf("row %d: invalid startDate", index+1)
 		}
+		entries = append(entries, RateEntry{Date: date, BPR: row.RateBPR})
 	}
-	if selected == nil {
-		return loan.Money{}, errors.New("LPS rate response contains no rate at or before requested date")
+	if len(entries) == 0 {
+		return nil, errors.New("no LPS rate rows found from LPS website")
 	}
-	return selected.rate, nil
+	return entries, nil
 }
 
-type ratePoint struct {
-	date time.Time
-	rate loan.Money
-}
-
-func collectRatePoints(value any, points *[]ratePoint, location *time.Location) error {
-	switch typed := value.(type) {
-	case []any:
-		for _, item := range typed {
-			if err := collectRatePoints(item, points, location); err != nil {
-				return err
-			}
-		}
-	case map[string]any:
-		var dateRaw, rateRaw string
-		for key, raw := range typed {
-			name := canonical(key)
-			switch name {
-			case "tanggal", "date", "tanggal_berlaku", "berlaku_mulai", "start_date":
-				dateRaw = fmt.Sprint(raw)
-			case "rate_bpr", "bpr", "suku_bunga_bpr", "tingkat_bunga_penjaminan_bpr", "rate":
-				rateRaw = fmt.Sprint(raw)
-			}
-		}
-		if dateRaw != "" && rateRaw != "" {
-			date, dateErr := parseDate(dateRaw, location)
-			rate, rateErr := parseMoney(rateRaw)
-			if dateErr != nil || rateErr != nil {
-				return fmt.Errorf("malformed LPS rate row")
-			}
-			*points = append(*points, ratePoint{date: date, rate: rate})
-		}
-		for _, nested := range typed {
-			if err := collectRatePoints(nested, points, location); err != nil {
-				return err
-			}
+func parseLPSRateDate(value string) (time.Time, error) {
+	if value == "" {
+		return time.Time{}, errors.New("date is empty")
+	}
+	for _, layout := range []string{"2006-01-02T15:04:05", time.RFC3339, "2006-01-02", "20060102"} {
+		if parsed, err := time.Parse(layout, value); err == nil {
+			return time.Date(parsed.Year(), parsed.Month(), parsed.Day(), 0, 0, 0, 0, time.UTC), nil
 		}
 	}
-	return nil
+	return time.Time{}, errors.New("invalid date format")
 }

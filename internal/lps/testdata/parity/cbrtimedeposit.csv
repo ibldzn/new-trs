@@ -1,0 +1,4 @@
+cif_no|acc_no|product|start_date|interest_rate|nominal|blocked_nominal|end_date
+C2|D1|201A|2026-01-01|7|2,000.99|0|2026-12-31
+C3|D2|201B|2026-02-01|0.04|1,000|0|2027-02-01
+
