@@ -158,11 +158,15 @@ func newResultView(resolved loan.ResolvedPosition, requestedAccount string, asOf
 		})
 	}
 	if resolved.Position.Source == loan.SourceReconstructed {
+		paymentStatusByInstallment := make(map[int64]string, len(resolved.Loan.ContractScheduleEvidence))
+		for _, row := range resolved.Loan.ContractScheduleEvidence {
+			paymentStatusByInstallment[row.Number] = row.RawPaymentStatus
+		}
 		for _, row := range resolved.ContractualSchedule {
 			schedule = append(schedule, ScheduleRowView{
 				Number: row.Number, Date: formatDate(row.DueDate), Principal: formatCurrency(row.Principal),
 				Interest: formatCurrency(row.Interest), Installment: formatCurrency(row.Installment),
-				Outstanding: formatCurrency(row.ScheduledBalance), Status: "-",
+				Outstanding: formatCurrency(row.ScheduledBalance), Status: displayText(paymentStatusByInstallment[int64(row.Number)]),
 			})
 		}
 	}

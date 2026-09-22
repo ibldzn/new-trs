@@ -25,6 +25,7 @@ type scalar struct {
 type scheduleDTO struct {
 	Date          string `json:"tanggal"`
 	InstallmentNo int64  `json:"angsuranke"`
+	PaymentStatus string `json:"statusbayar"`
 }
 
 type dateObjectDTO struct {
@@ -242,7 +243,7 @@ func mapLoan(source loanDTO, location *time.Location) (loan.ContractData, error)
 	}
 	result.ContractScheduleEvidence = make([]loan.ContractualInstallmentEvidence, len(source.Schedule))
 	for index, row := range source.Schedule {
-		result.ContractScheduleEvidence[index] = loan.ContractualInstallmentEvidence{Number: row.InstallmentNo, RawDueDate: row.Date}
+		result.ContractScheduleEvidence[index] = loan.ContractualInstallmentEvidence{Number: row.InstallmentNo, RawDueDate: row.Date, RawPaymentStatus: row.PaymentStatus}
 	}
 	result.Repayments = make([]loan.Repayment, 0, len(source.Repayments))
 	for index, row := range source.Repayments {

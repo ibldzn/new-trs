@@ -92,6 +92,21 @@ func TestMapLoanKeepsOnlyFincloudScheduleNumberAndDateAsContractualTruth(t *test
 	}
 }
 
+func TestMapLoanPreservesFincloudSchedulePaymentStatus(t *testing.T) {
+	var source loanDTO
+	if err := json.Unmarshal([]byte(`{"id":"primary","plafondlimit":"100","jangkawaktu":"1 bulan","bungaflat":"12","jadwalangsuran":[{"angsuranke":1,"tanggal":"2026-01-01","statusbayar":"Paid Off"}]}`), &source); err != nil {
+		t.Fatal(err)
+	}
+	contract, err := mapLoan(source, time.FixedZone("Jakarta", 7*60*60))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := loan.ContractualInstallmentEvidence{Number: 1, RawDueDate: "2026-01-01", RawPaymentStatus: "Paid Off"}
+	if len(contract.ContractScheduleEvidence) != 1 || contract.ContractScheduleEvidence[0] != want {
+		t.Fatalf("evidence = %+v, want %+v", contract.ContractScheduleEvidence, want)
+	}
+}
+
 func TestMapLoanIgnoresRestructuringMetadata(t *testing.T) {
 	var source loanDTO
 	raw := `{"id":"primary","plafondlimit":"100","jangkawaktu":"1 bulan","bungaflat":"12","restruktur_tanggalakhirakad":{"date":"2023-10-30 00:00:00.000000","timezone_type":3,"timezone":"Asia/Jakarta"},"jadwalangsuran":[{"angsuranke":1,"tanggal":"2025-11-12"}]}`

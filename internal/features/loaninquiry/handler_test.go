@@ -131,6 +131,29 @@ func TestResultViewAddsPresentationOnlyDisbursementRow(t *testing.T) {
 	}
 }
 
+func TestResultViewUsesFincloudStatusByInstallmentNumberForReconstructedSchedule(t *testing.T) {
+	resolved, asOf := syntheticResolved(t, 3)
+	resolved.Loan.ContractScheduleEvidence = []loan.ContractualInstallmentEvidence{
+		{Number: 3, RawPaymentStatus: "Lunas"},
+		{Number: 0, RawPaymentStatus: "irrelevant"},
+		{Number: 2, RawPaymentStatus: ""},
+		{Number: 1, RawPaymentStatus: "Paid Off"},
+	}
+	view, err := newResultView(resolved, resolved.Loan.PrimaryAccount, asOf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if resolved.Position.Source != loan.SourceReconstructed || len(resolved.ContractualSchedule) != 3 {
+		t.Fatalf("fixture source=%s schedule=%d", resolved.Position.Source, len(resolved.ContractualSchedule))
+	}
+	want := []string{"DISBURSED", "Paid Off", "-", "Lunas"}
+	for index, status := range want {
+		if view.ScheduleRows[index].Status != status {
+			t.Errorf("row %d status=%q want %q", index, view.ScheduleRows[index].Status, status)
+		}
+	}
+}
+
 func TestResultViewOmitsDisbursementRowWithoutAuthoritativeStart(t *testing.T) {
 	resolved, asOf := syntheticResolved(t, 3)
 	resolved.Position.LoanStartDate = loan.Date{}
@@ -156,6 +179,7 @@ func TestCurrencyFormattingKeepsExactMoneyAndAddsGrouping(t *testing.T) {
 
 func TestSuccessfulScreenUsesCohesiveLayoutAndPreservesInquiry(t *testing.T) {
 	resolved, asOf := syntheticResolved(t, 60)
+	resolved.Loan.ContractScheduleEvidence = []loan.ContractualInstallmentEvidence{{Number: 1, RawPaymentStatus: "Paid Off"}, {Number: 2}, {Number: 3, RawPaymentStatus: "Lunas"}}
 	positions := &fakePositions{resolved: resolved}
 	var audited audit.Event
 	router, token := loanInquiryRouter(t, permittedPrincipal(), positions, func(_ context.Context, event audit.Event) error {
@@ -172,7 +196,7 @@ func TestSuccessfulScreenUsesCohesiveLayoutAndPreservesInquiry(t *testing.T) {
 		"RIWAYAT TRANSAKSI PINJAMAN", "NAMA NASABAH", "REKENING", "ALT REKENING", "KANTOR CABANG", "PRODUK", "PERIODE PINJAMAN", "ANGSURAN", "DENDA PELUNASAN DIPERCEPAT",
 		"PLAFON AKAD", "SB EFEKTIF", "SB KONTRAK", "KOLEK", "BAKI DEBET", "TUNGGAKAN POKOK", "TUNGGAKAN BUNGA", "TUNGGAKAN PINALTI",
 		"REPAYMENT PLAN", "Installment Schedule", "Print PDF", "NO.", "DATE", "INSTALLMENT", "PRINCIPAL", "INTEREST", "OUTSTANDING", "STATUS",
-		"DWI SULASTRI", "Rp 100,000,000.00", "Rp 43,326,865.00", "Rp 125,000.00", "Rp 50,000.00", "34 dari 60", "DISBURSED",
+		"DWI SULASTRI", "Rp 100,000,000.00", "Rp 43,326,865.00", "Rp 125,000.00", "Rp 50,000.00", "34 dari 60", "DISBURSED", "Paid Off", "Lunas",
 	} {
 		if !strings.Contains(body, text) {
 			t.Errorf("screen missing %q", text)
@@ -181,6 +205,16 @@ func TestSuccessfulScreenUsesCohesiveLayoutAndPreservesInquiry(t *testing.T) {
 	for _, text := range []string{"Principal Paid", "Interest Paid", "Periodic Rp", ">ET estimate<"} {
 		if strings.Contains(body, text) {
 			t.Errorf("screen retains old dashboard content %q", text)
+		}
+	}
+	for _, pattern := range []string{
+		`<tr[^\n]*<td[^>]*>0</td>[^\n]*<td[^>]*>DISBURSED</td></tr>`,
+		`<tr[^\n]*<td[^>]*>1</td>[^\n]*<td[^>]*>Paid Off</td></tr>`,
+		`<tr[^\n]*<td[^>]*>2</td>[^\n]*<td[^>]*>-</td></tr>`,
+		`<tr[^\n]*<td[^>]*>3</td>[^\n]*<td[^>]*>Lunas</td></tr>`,
+	} {
+		if !regexp.MustCompile(pattern).MatchString(body) {
+			t.Errorf("screen schedule missing pattern %q", pattern)
 		}
 	}
 	if !strings.Contains(body, `value="0130102895"`) || !strings.Contains(body, `value="2026-09-18"`) || !strings.Contains(body, `href="/loans/inquiry/pdf?account=0130102895&amp;as_of=2026-09-18" target="_blank" rel="noopener"`) {
@@ -235,6 +269,7 @@ func TestPDFRejectsMissingOrMalformedInput(t *testing.T) {
 
 func TestPDFUsesSharedPositionAndReturnsBrandedMultipageDocument(t *testing.T) {
 	resolved, asOf := syntheticResolved(t, 60)
+	resolved.Loan.ContractScheduleEvidence = []loan.ContractualInstallmentEvidence{{Number: 1, RawPaymentStatus: "Paid Off"}, {Number: 3, RawPaymentStatus: "Lunas"}}
 	positions := &fakePositions{resolved: resolved}
 	router, token := loanInquiryRouter(t, permittedPrincipal(), positions, nil)
 	response := requestLoanInquiry(router, token, http.MethodGet, "/loans/inquiry/pdf?account=0130102895&as_of=2026-09-18", nil)
@@ -260,7 +295,7 @@ func TestPDFUsesSharedPositionAndReturnsBrandedMultipageDocument(t *testing.T) {
 	if pages := len(regexp.MustCompile(`/Type /Page\b`).FindAll(document, -1)); pages < 2 {
 		t.Fatalf("60-installment PDF page count=%d", pages)
 	}
-	for _, value := range []string{"DWI SULASTRI", "3000010000000061", "Rp 100,000,000.00", "Rp 43,326,865.00", "Rp 125,000.00", "Rp 50,000.00", "34 dari 60", "DISBURSED"} {
+	for _, value := range []string{"DWI SULASTRI", "3000010000000061", "Rp 100,000,000.00", "Rp 43,326,865.00", "Rp 125,000.00", "Rp 50,000.00", "34 dari 60", "DISBURSED", "Paid Off", "Lunas"} {
 		if !strings.Contains(string(document), value) {
 			t.Errorf("PDF missing shared presentation value %q", value)
 		}

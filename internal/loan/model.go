@@ -63,8 +63,9 @@ type ContractualInstallment struct {
 }
 
 type ContractualInstallmentEvidence struct {
-	Number     int64
-	RawDueDate string
+	Number           int64
+	RawDueDate       string
+	RawPaymentStatus string
 }
 
 type ContractualScheduleRow struct {
