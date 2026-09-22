@@ -6,8 +6,8 @@ import (
 )
 
 func TestNormalizeUsername(t *testing.T) {
-	if got := NormalizeUsername("  HAYTSAM  "); got != "haytsam" {
-		t.Fatalf("expected haytsam, got %q", got)
+	if got := NormalizeUsername("  HAYTSAM  "); got != "HAYTSAM" {
+		t.Fatalf("expected HAYTSAM, got %q", got)
 	}
 }
 

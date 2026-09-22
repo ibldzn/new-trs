@@ -74,9 +74,9 @@ func testService(t *testing.T, authenticator *fakeAuthenticator, users *fakeUser
 	return service
 }
 
-func TestFincloudLoginPreservesCaseThenUsesCanonicalIdentity(t *testing.T) {
+func TestFincloudLoginPreservesCaseForLocalIdentity(t *testing.T) {
 	authenticator := &fakeAuthenticator{}
-	users := &fakeUsers{found: user.User{ID: 7, Username: "user001", Name: "User", IsActive: true}, created: true}
+	users := &fakeUsers{found: user.User{ID: 7, Username: "USER001", Name: "User", IsActive: true}, created: true}
 	sessions := &fakeSessions{}
 	result, err := testService(t, authenticator, users, &fakePermissions{}, sessions).Login(context.Background(), LoginInput{Username: "  USER001  ", Password: "secret", LocationID: "001", RoleID: "R1", RememberMe: true}, time.Now())
 	if err != nil {
@@ -85,7 +85,7 @@ func TestFincloudLoginPreservesCaseThenUsesCanonicalIdentity(t *testing.T) {
 	if authenticator.username != "USER001" || authenticator.password != "secret" || authenticator.location != "001" || authenticator.role != "R1" {
 		t.Fatalf("Fincloud input changed: %+v", authenticator)
 	}
-	if users.username != "user001" || result.User.ID != 7 || !result.Provisioned || sessions.created.UserID != 7 || !sessions.created.RememberMe {
+	if users.username != "USER001" || result.User.ID != 7 || !result.Provisioned || sessions.created.UserID != 7 || !sessions.created.RememberMe {
 		t.Fatalf("local result=%+v user=%q session=%+v", result, users.username, sessions.created)
 	}
 }

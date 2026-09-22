@@ -6,8 +6,8 @@ import (
 )
 
 func TestBootstrapUsernamesNormalizeDeduplicateAndRejectEmpty(t *testing.T) {
-	got, err := bootstrapUsernames(" Alice, bob,ALICE ")
-	if err != nil || !reflect.DeepEqual(got, []string{"alice", "bob"}) {
+	got, err := bootstrapUsernames(" Alice, bob,ALICE,Alice ")
+	if err != nil || !reflect.DeepEqual(got, []string{"Alice", "bob", "ALICE"}) {
 		t.Fatalf("usernames=%v err=%v", got, err)
 	}
 	if _, err := bootstrapUsernames(" , "); err == nil {

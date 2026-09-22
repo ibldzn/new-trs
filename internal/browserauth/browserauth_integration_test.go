@@ -43,18 +43,18 @@ func TestFincloudLoginAutoProvisionAndLivePermissions(t *testing.T) {
 	service := integrationService(t, database, integrationAuthenticator{})
 	ctx := context.Background()
 	now := integrationdb.Now()
-	input := LoginInput{Username: "  USER001  ", Password: "fincloud-secret", LocationID: "001", RoleID: "R1"}
+	input := LoginInput{Username: "  User001  ", Password: "fincloud-secret", LocationID: "001", RoleID: "R1"}
 	first, err := service.Login(ctx, input, now)
 	if err != nil || !first.Provisioned {
 		t.Fatalf("first login=%+v err=%v", first, err)
 	}
-	input.Username = "user001"
+	input.Username = "User001"
 	second, err := service.Login(ctx, input, now.Add(time.Second))
 	if err != nil || second.Provisioned || second.User.ID != first.User.ID {
 		t.Fatalf("second login=%+v err=%v", second, err)
 	}
 	var users, passwordColumns int
-	if err := database.GetContext(ctx, &users, `SELECT COUNT(*) FROM users WHERE username='user001'`); err != nil {
+	if err := database.GetContext(ctx, &users, `SELECT COUNT(*) FROM users WHERE username='User001'`); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.GetContext(ctx, &passwordColumns, `SELECT COUNT(*) FROM information_schema.columns WHERE table_schema=DATABASE() AND table_name='users' AND column_name='password_hash'`); err != nil {
@@ -81,6 +81,33 @@ func TestFincloudLoginAutoProvisionAndLivePermissions(t *testing.T) {
 	principal, err = service.ResolveSession(ctx, auth.HashToken(first.RawToken), now.Add(4*time.Second))
 	if err != nil || principal.Can("reporting.generate") || !principal.Can(access.PermissionLoanInquiry) {
 		t.Fatalf("revoked principal=%+v err=%v", principal, err)
+	}
+}
+
+func TestFincloudUsernameCaseCreatesDistinctPermissionIdentities(t *testing.T) {
+	database := integrationdb.Open(t)
+	integrationdb.Reset(t, database, browserDefinitions())
+	service := integrationService(t, database, integrationAuthenticator{})
+	ctx := context.Background()
+	now := integrationdb.Now()
+	upper, err := service.Login(ctx, LoginInput{Username: "User001", Password: "secret", LocationID: "1", RoleID: "2"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lower, err := service.Login(ctx, LoginInput{Username: "user001", Password: "secret", LocationID: "1", RoleID: "2"}, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if upper.User.ID == lower.User.ID || upper.User.Username != "User001" || lower.User.Username != "user001" {
+		t.Fatalf("upper=%+v lower=%+v", upper.User, lower.User)
+	}
+	if _, err := database.ExecContext(ctx, `INSERT INTO user_permissions (user_id, permission_id) SELECT ?, id FROM permissions WHERE `+"`key`"+`='reporting.generate'`, upper.User.ID); err != nil {
+		t.Fatal(err)
+	}
+	upperPrincipal, upperErr := service.ResolveSession(ctx, auth.HashToken(upper.RawToken), now)
+	lowerPrincipal, lowerErr := service.ResolveSession(ctx, auth.HashToken(lower.RawToken), now)
+	if upperErr != nil || lowerErr != nil || !upperPrincipal.Can("reporting.generate") || lowerPrincipal.Can("reporting.generate") {
+		t.Fatalf("upper=%+v upper_err=%v lower=%+v lower_err=%v", upperPrincipal, upperErr, lowerPrincipal, lowerErr)
 	}
 }
 
@@ -117,7 +144,7 @@ func TestConcurrentFirstLoginCreatesOneIdentityAndFailuresCreateNone(t *testing.
 		}
 	}
 	var count int
-	if err := database.GetContext(ctx, &count, `SELECT COUNT(*) FROM users WHERE username='raceuser'`); err != nil || count != 1 {
+	if err := database.GetContext(ctx, &count, `SELECT COUNT(*) FROM users WHERE username='RACEUSER'`); err != nil || count != 1 {
 		t.Fatalf("count=%d err=%v", count, err)
 	}
 

@@ -104,6 +104,24 @@ func TestPerUserPermissionsStatusAndLastManagerInvariant(t *testing.T) {
 	}
 }
 
+func TestUsernameSearchIsCaseSensitive(t *testing.T) {
+	database := integrationdb.Open(t)
+	integrationdb.Reset(t, database, integrationDefinitions())
+	upper := integrationdb.User(t, database, "User001", true)
+	lower := integrationdb.User(t, database, "user001", true)
+	if _, err := database.Exec(`UPDATE users SET name = CASE id WHEN ? THEN 'Upper display' WHEN ? THEN 'Lower display' END WHERE id IN (?, ?)`, upper.ID, lower.ID, upper.ID, lower.ID); err != nil {
+		t.Fatal(err)
+	}
+	repository := NewRepository(database, nil)
+
+	for _, username := range []string{"User001", "user001"} {
+		rows, err := repository.ListUsers(context.Background(), username, 10, 0)
+		if err != nil || len(rows) != 1 || rows[0].Username != username {
+			t.Fatalf("query=%q rows=%+v err=%v", username, rows, err)
+		}
+	}
+}
+
 func localUserByUsername(t *testing.T, database interface {
 	GetContext(context.Context, any, string, ...any) error
 }, username string) UserRecord {

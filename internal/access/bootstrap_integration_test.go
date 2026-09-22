@@ -35,20 +35,20 @@ func TestBootstrapCreatesManagersOnceThenDatabaseRemainsAuthoritative(t *testing
 		WHERE u.is_active=TRUE AND p.key=? ORDER BY u.username`, access.PermissionManage); err != nil {
 		t.Fatal(err)
 	}
-	if len(managers) != 2 || managers[0] != "alice" || managers[1] != "bob" {
+	if len(managers) != 2 || managers[0] != "Alice" || managers[1] != "BOB" {
 		t.Fatalf("managers=%v", managers)
 	}
-	if _, err := database.ExecContext(ctx, `DELETE up FROM user_permissions up JOIN users u ON u.id=up.user_id JOIN permissions p ON p.id=up.permission_id WHERE u.username='alice' AND p.key=?`, access.PermissionManage); err != nil {
+	if _, err := database.ExecContext(ctx, `DELETE up FROM user_permissions up JOIN users u ON u.id=up.user_id JOIN permissions p ON p.id=up.permission_id WHERE u.username='Alice' AND p.key=?`, access.PermissionManage); err != nil {
 		t.Fatal(err)
 	}
 	if err := access.Bootstrap(ctx, database, bootstrapDefinitions(), "Alice,Charlie", integrationdb.Now()); err != nil {
 		t.Fatal(err)
 	}
 	var aliceGrant, charlieUsers, sessions, auditEvents int
-	if err := database.GetContext(ctx, &aliceGrant, `SELECT COUNT(*) FROM user_permissions up JOIN users u ON u.id=up.user_id JOIN permissions p ON p.id=up.permission_id WHERE u.username='alice' AND p.key=?`, access.PermissionManage); err != nil {
+	if err := database.GetContext(ctx, &aliceGrant, `SELECT COUNT(*) FROM user_permissions up JOIN users u ON u.id=up.user_id JOIN permissions p ON p.id=up.permission_id WHERE u.username='Alice' AND p.key=?`, access.PermissionManage); err != nil {
 		t.Fatal(err)
 	}
-	if err := database.GetContext(ctx, &charlieUsers, `SELECT COUNT(*) FROM users WHERE username='charlie'`); err != nil {
+	if err := database.GetContext(ctx, &charlieUsers, `SELECT COUNT(*) FROM users WHERE username='Charlie'`); err != nil {
 		t.Fatal(err)
 	}
 	if err := database.GetContext(ctx, &sessions, `SELECT COUNT(*) FROM sessions`); err != nil {

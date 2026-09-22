@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ibldzn/trs/internal/audit"
 	"github.com/ibldzn/trs/internal/auth"
 	"github.com/ibldzn/trs/internal/fincloud"
 	"github.com/ibldzn/trs/internal/render"
@@ -83,13 +84,16 @@ func TestLoginCreatesTHORCookieAndUsesAuthorizedDefault(t *testing.T) {
 	service := &fakeHTTPService{result: LoginResult{
 		RawToken: token,
 		Session:  auth.Session{RememberMe: true, CreatedAt: time.Now()},
-		User:     user.User{ID: 7, Username: "user001"},
+		User:     user.User{ID: 7, Username: "User001"},
 	}}
+	handler := newTestHTTP(t, service)
+	var events []audit.Event
+	handler.appendAudit = func(_ context.Context, event audit.Event) error { events = append(events, event); return nil }
 	form := validLoginForm("fincloud-secret")
 	form.Set("remember_me", "on")
-	response := postLogin(newTestHTTP(t, service), form)
+	response := postLogin(handler, form)
 	cookies := response.Result().Cookies()
-	if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/loans/inquiry" || len(cookies) != 1 || cookies[0].Value != token || service.input.Password != "fincloud-secret" || !service.input.RememberMe {
+	if response.Code != http.StatusSeeOther || response.Header().Get("Location") != "/loans/inquiry" || len(cookies) != 1 || cookies[0].Value != token || service.input.Password != "fincloud-secret" || !service.input.RememberMe || len(events) != 1 || events[0].Attribution.Actor.Username != "User001" {
 		t.Fatalf("status=%d location=%q cookies=%+v input=%+v", response.Code, response.Header().Get("Location"), cookies, service.input)
 	}
 }
