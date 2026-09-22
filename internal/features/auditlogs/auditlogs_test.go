@@ -17,10 +17,10 @@ import (
 	"github.com/ibldzn/trs/internal/audit"
 	"github.com/ibldzn/trs/internal/auth"
 	"github.com/ibldzn/trs/internal/browserauth"
+	"github.com/ibldzn/trs/internal/fincloud"
 	"github.com/ibldzn/trs/internal/platform/adminshell"
 	"github.com/ibldzn/trs/internal/platform/navigation"
 	"github.com/ibldzn/trs/internal/render"
-	"github.com/ibldzn/trs/internal/user"
 	webfiles "github.com/ibldzn/trs/web"
 )
 
@@ -66,7 +66,7 @@ func TestListUsesTwoQueriesAndFixedPageSize(t *testing.T) {
 func TestIdentityMetadataAndLinks(t *testing.T) {
 	actorID, effectiveID := uint64(1), uint64(2)
 	record := Record{ActorUserID: &actorID, ActorUsername: "admin", EffectiveUserID: &effectiveID, EffectiveUsername: "member", Metadata: []byte(`{"note":"<script>alert(1)</script>"}`)}
-	if record.Actor().Label != "@admin" || record.Effective().Label != "@member" || !record.IsImpersonated() {
+	if record.Actor().Label != "@admin" || record.Effective().Label != "@member" {
 		t.Fatalf("unexpected identities: actor=%+v effective=%+v", record.Actor(), record.Effective())
 	}
 	parsed := template.Must(template.New("metadata").Parse(`{{.MetadataText}}`))
@@ -100,8 +100,8 @@ type fakeAuthentication struct{ principal browserauth.Principal }
 func (*fakeAuthentication) Login(context.Context, browserauth.LoginInput, time.Time) (browserauth.LoginResult, error) {
 	return browserauth.LoginResult{}, browserauth.ErrInvalidCredentials
 }
-func (*fakeAuthentication) Register(context.Context, browserauth.RegisterInput, time.Time) (user.User, error) {
-	return user.User{}, nil
+func (*fakeAuthentication) Labels(context.Context) (fincloud.AuthLabels, error) {
+	return fincloud.AuthLabels{}, nil
 }
 func (service *fakeAuthentication) ResolveSession(context.Context, [32]byte, time.Time) (browserauth.Principal, error) {
 	return service.principal, nil
@@ -115,20 +115,14 @@ func TestRoutesRequireAuditPermissionAndRemainReadOnly(t *testing.T) {
 		path       string
 		method     string
 		wantStatus int
-		wantBanner bool
 	}{
-		{name: "permissionless", principal: browserauth.Principal{RoleSlug: access.UserRoleSlug}, path: "/audit-logs", method: http.MethodGet, wantStatus: http.StatusForbidden},
-		{name: "impersonated permissionless", principal: browserauth.Principal{RoleSlug: access.UserRoleSlug, IsImpersonating: true, Actor: browserauth.Identity{UserID: 7, Username: "admin", RoleSlug: access.AdminRoleSlug}}, path: "/audit-logs", method: http.MethodGet, wantStatus: http.StatusForbidden, wantBanner: true},
-		{name: "explicit permission", principal: browserauth.Principal{RoleSlug: access.UserRoleSlug, Permissions: access.NewPermissionSet([]string{PermissionView})}, path: "/audit-logs", method: http.MethodGet, wantStatus: http.StatusOK},
-		{name: "administrator bypass", principal: browserauth.Principal{RoleSlug: access.AdminRoleSlug}, path: "/audit-logs", method: http.MethodGet, wantStatus: http.StatusOK},
-		{name: "malformed detail", principal: browserauth.Principal{RoleSlug: access.AdminRoleSlug}, path: "/audit-logs/nope", method: http.MethodGet, wantStatus: http.StatusNotFound},
-		{name: "no mutation", principal: browserauth.Principal{RoleSlug: access.AdminRoleSlug}, path: "/audit-logs", method: http.MethodPost, wantStatus: http.StatusMethodNotAllowed},
+		{name: "permissionless", principal: browserauth.Principal{}, path: "/audit-logs", method: http.MethodGet, wantStatus: http.StatusForbidden},
+		{name: "explicit permission", principal: browserauth.Principal{Permissions: access.NewPermissionSet([]string{PermissionView})}, path: "/audit-logs", method: http.MethodGet, wantStatus: http.StatusOK},
+		{name: "malformed detail", principal: browserauth.Principal{Permissions: access.NewPermissionSet([]string{PermissionView})}, path: "/audit-logs/nope", method: http.MethodGet, wantStatus: http.StatusNotFound},
+		{name: "no mutation", principal: browserauth.Principal{Permissions: access.NewPermissionSet([]string{PermissionView})}, path: "/audit-logs", method: http.MethodPost, wantStatus: http.StatusMethodNotAllowed},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			test.principal.UserID, test.principal.Username = 1, "viewer"
-			if test.principal.Actor.UserID == 0 {
-				test.principal.Actor = browserauth.Identity{UserID: 1, Username: "viewer", RoleSlug: test.principal.RoleSlug}
-			}
 			router, token := auditRouter(t, test.principal)
 			request := httptest.NewRequest(test.method, test.path, nil)
 			request.AddCookie(&http.Cookie{Name: "session", Value: token})
@@ -136,9 +130,6 @@ func TestRoutesRequireAuditPermissionAndRemainReadOnly(t *testing.T) {
 			router.ServeHTTP(response, request)
 			if response.Code != test.wantStatus {
 				t.Fatalf("status=%d body=%q", response.Code, response.Body.String())
-			}
-			if test.wantBanner && (!strings.Contains(response.Body.String(), "is impersonating") || !strings.Contains(response.Body.String(), "Return to Admin")) {
-				t.Fatalf("impersonation banner missing: %q", response.Body.String())
 			}
 		})
 	}
@@ -158,7 +149,7 @@ func auditRouter(t *testing.T, principal browserauth.Principal) (http.Handler, s
 	}
 	shell := adminshell.New(renderer, registry, "Test", errors)
 	cookies := browserauth.NewCookieManager("session", false, time.Hour)
-	authentication := browserauth.NewHTTP(&fakeAuthentication{principal}, renderer, cookies, "Test", false, logger, func(context.Context, audit.Event) error { return nil }, errors)
+	authentication := browserauth.NewHTTP(&fakeAuthentication{principal}, renderer, cookies, "Test", logger, func(context.Context, audit.Event) error { return nil }, errors)
 	router := chi.NewRouter()
 	router.Use(authentication.LoadPrincipal)
 	NewHandler(shell, NewService(&fakeStore{})).RegisterRoutes(router)

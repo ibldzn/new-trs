@@ -10,7 +10,6 @@ import (
 	"github.com/ibldzn/trs/internal/access"
 	"github.com/ibldzn/trs/internal/audit"
 	"github.com/ibldzn/trs/internal/features/dashboard"
-	featureRoles "github.com/ibldzn/trs/internal/features/roles"
 	featureUsers "github.com/ibldzn/trs/internal/features/users"
 	"github.com/ibldzn/trs/internal/testutil/integrationdb"
 )
@@ -18,7 +17,6 @@ import (
 func integrationDefinitions() []access.PermissionDefinition {
 	definitions := dashboard.PermissionDefinitions()
 	definitions = append(definitions, featureUsers.PermissionDefinitions()...)
-	definitions = append(definitions, featureRoles.PermissionDefinitions()...)
 	definitions = append(definitions, PermissionDefinitions()...)
 	return definitions
 }
@@ -27,10 +25,8 @@ func TestAuditLogsMySQLIntegration(t *testing.T) {
 	db := integrationdb.Open(t)
 	integrationdb.Reset(t, db, integrationDefinitions())
 	now := integrationdb.Now()
-	adminRole := integrationdb.Role(t, db, access.AdminRoleSlug)
-	userRole := integrationdb.Role(t, db, access.UserRoleSlug)
-	admin := integrationdb.User(t, db, "admin", adminRole.ID, true)
-	target := integrationdb.User(t, db, "target", userRole.ID, true)
+	admin := integrationdb.User(t, db, "admin", true)
+	target := integrationdb.User(t, db, "target", true)
 	identity := audit.Identity{UserID: admin.ID, Username: admin.Username}
 	for index := 0; index < 52; index++ {
 		action := audit.ActionUserCreated
@@ -61,7 +57,7 @@ func TestAuditLogsMySQLIntegration(t *testing.T) {
 		t.Fatalf("unknown filter: %+v err=%v", empty, err)
 	}
 	found, err := service.Find(context.Background(), page.Rows[0].ID)
-	if err != nil || found.Actor().Label != "@admin" || found.Effective().Label != "@admin" || found.IsImpersonated() {
+	if err != nil || found.Actor().Label != "@admin" || found.Effective().Label != "@admin" {
 		t.Fatalf("detail=%+v err=%v", found, err)
 	}
 	if _, err := service.Find(context.Background(), ^uint64(0)); err != ErrNotFound {
@@ -70,7 +66,7 @@ func TestAuditLogsMySQLIntegration(t *testing.T) {
 	for _, event := range []audit.Event{
 		{Action: audit.ActionAuthRegistration, Resource: audit.ResourceUser, ResourceID: target.ID, CreatedAt: now.Add(time.Second)},
 		{Action: audit.ActionAdminBootstrap, Resource: audit.ResourceUser, ResourceID: admin.ID, CreatedAt: now.Add(2 * time.Second)},
-		{Attribution: audit.Attribution{Actor: &identity, Effective: &audit.Identity{UserID: target.ID, Username: target.Username}}, Action: audit.ActionImpersonationStarted, Resource: audit.ResourceUser, ResourceID: target.ID, Metadata: audit.ImpersonationStartedMetadata{TargetRole: userRole.Slug}, CreatedAt: now.Add(3 * time.Second)},
+		{Attribution: audit.Attribution{Actor: &identity, Effective: &audit.Identity{UserID: target.ID, Username: target.Username}}, Action: audit.ActionImpersonationStarted, Resource: audit.ResourceUser, ResourceID: target.ID, Metadata: audit.ImpersonationStartedMetadata{TargetRole: "historical"}, CreatedAt: now.Add(3 * time.Second)},
 	} {
 		if err := audit.Append(context.Background(), db, event); err != nil {
 			t.Fatal(err)
@@ -89,7 +85,7 @@ func TestAuditLogsMySQLIntegration(t *testing.T) {
 	public, _ := service.Find(context.Background(), publicID)
 	system, _ := service.Find(context.Background(), systemID)
 	impersonated, _ := service.Find(context.Background(), impersonatedID)
-	if public.Actor().Label != "Public" || public.Effective().Label != "—" || system.Actor().Label != "System" || !impersonated.IsImpersonated() {
+	if public.Actor().Label != "Public" || public.Effective().Label != "—" || system.Actor().Label != "System" || impersonated.Actor().Label != "@admin" || impersonated.Effective().Label != "@target" {
 		t.Fatalf("identity rendering: public=%+v system=%+v impersonated=%+v", public, system, impersonated)
 	}
 }

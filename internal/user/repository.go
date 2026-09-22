@@ -34,22 +34,13 @@ func (r *Repository) Create(ctx context.Context, params CreateParams, now time.T
 	if err := ValidateName(params.Name); err != nil {
 		return User{}, err
 	}
-	if params.PasswordHash == "" {
-		return User{}, fmt.Errorf("password hash must not be empty")
-	}
-	if params.RoleID == 0 {
-		return User{}, fmt.Errorf("role ID must not be zero")
-	}
-
 	now = now.UTC()
 	const query = `
-		INSERT INTO users (username, name, password_hash, role_id, is_active, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?)`
+		INSERT INTO users (username, name, is_active, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?)`
 	result, err := r.database.ExecContext(ctx, query,
 		params.Username,
 		params.Name,
-		params.PasswordHash,
-		params.RoleID,
 		params.IsActive,
 		now,
 		now,
@@ -67,20 +58,37 @@ func (r *Repository) Create(ctx context.Context, params CreateParams, now time.T
 	}
 
 	return User{
-		ID:           uint64(id),
-		Username:     params.Username,
-		Name:         params.Name,
-		PasswordHash: params.PasswordHash,
-		RoleID:       params.RoleID,
-		IsActive:     params.IsActive,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		ID: uint64(id), Username: params.Username, Name: params.Name,
+		IsActive: params.IsActive, CreatedAt: now, UpdatedAt: now,
 	}, nil
+}
+
+func (r *Repository) FindOrCreateFromAuthenticatedUsername(ctx context.Context, username string, now time.Time) (User, bool, error) {
+	username = NormalizeUsername(username)
+	if err := ValidateUsername(username); err != nil {
+		return User{}, false, err
+	}
+	found, err := r.FindByUsername(ctx, username)
+	if err == nil {
+		return found, false, nil
+	}
+	if !errors.Is(err, ErrNotFound) {
+		return User{}, false, err
+	}
+	created, err := r.Create(ctx, CreateParams{Username: username, Name: username, IsActive: true}, now)
+	if err == nil {
+		return created, true, nil
+	}
+	if !errors.Is(err, ErrUsernameTaken) {
+		return User{}, false, err
+	}
+	found, err = r.FindByUsername(ctx, username)
+	return found, false, err
 }
 
 func (r *Repository) FindByID(ctx context.Context, id uint64) (User, error) {
 	return r.find(ctx, `
-		SELECT id, username, name, password_hash, role_id, is_active, last_login_at, created_at, updated_at
+		SELECT id, username, name, is_active, last_login_at, created_at, updated_at
 		FROM users
 		WHERE id = ?`, id)
 }
@@ -91,7 +99,7 @@ func (r *Repository) FindByUsername(ctx context.Context, username string) (User,
 		return User{}, err
 	}
 	return r.find(ctx, `
-		SELECT id, username, name, password_hash, role_id, is_active, last_login_at, created_at, updated_at
+		SELECT id, username, name, is_active, last_login_at, created_at, updated_at
 		FROM users
 		WHERE username = ?`, username)
 }

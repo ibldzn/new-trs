@@ -12,219 +12,156 @@ import (
 
 	"github.com/ibldzn/trs/internal/audit"
 	"github.com/ibldzn/trs/internal/auth"
+	"github.com/ibldzn/trs/internal/fincloud"
 	"github.com/ibldzn/trs/internal/render"
-	"github.com/ibldzn/trs/internal/user"
 )
 
 const maxFormBody = 32 << 10
 
 type authenticationService interface {
+	Labels(context.Context) (fincloud.AuthLabels, error)
 	Login(context.Context, LoginInput, time.Time) (LoginResult, error)
-	Register(context.Context, RegisterInput, time.Time) (user.User, error)
 	ResolveSession(context.Context, [32]byte, time.Time) (Principal, error)
 	Logout(context.Context, [32]byte) error
 }
 
 type HTTP struct {
-	service           authenticationService
-	renderer          *render.Renderer
-	cookies           CookieManager
-	appName           string
-	allowRegistration bool
-	logger            *slog.Logger
-	appendAudit       func(context.Context, audit.Event) error
-	errors            *render.ErrorResponder
+	service     authenticationService
+	renderer    *render.Renderer
+	cookies     CookieManager
+	appName     string
+	logger      *slog.Logger
+	appendAudit func(context.Context, audit.Event) error
+	errors      *render.ErrorResponder
 }
 
 type LoginForm struct {
-	Username          string
-	RememberMe        bool
-	Next              string
-	AllowRegistration bool
-	Errors            map[string]string
+	Username         string
+	SelectedLocation string
+	SelectedRole     string
+	Locations        []fincloud.AuthLabel
+	Roles            []fincloud.AuthLabel
+	RememberMe       bool
+	Next             string
+	Errors           map[string]string
 }
 
-type RegisterForm struct {
-	Name     string
-	Username string
-	Errors   map[string]string
+func NewHTTP(service authenticationService, renderer *render.Renderer, cookies CookieManager, appName string, logger *slog.Logger, appendAudit func(context.Context, audit.Event) error, errorResponder *render.ErrorResponder) *HTTP {
+	return &HTTP{service: service, renderer: renderer, cookies: cookies, appName: appName, logger: logger, appendAudit: appendAudit, errors: errorResponder}
 }
 
-func NewHTTP(service authenticationService, renderer *render.Renderer, cookies CookieManager, appName string, allowRegistration bool, logger *slog.Logger, appendAudit func(context.Context, audit.Event) error, errorResponder *render.ErrorResponder) *HTTP {
-	return &HTTP{service: service, renderer: renderer, cookies: cookies, appName: appName, allowRegistration: allowRegistration, logger: logger, appendAudit: appendAudit, errors: errorResponder}
+func (handler *HTTP) LoginPage(writer http.ResponseWriter, request *http.Request) {
+	form := LoginForm{Next: SafeRedirect(request.URL.Query().Get("next")), Errors: map[string]string{}}
+	if !handler.loadLabels(writer, request, &form) {
+		return
+	}
+	handler.renderLogin(writer, request, http.StatusOK, form)
 }
 
-func (h *HTTP) LoginPage(writer http.ResponseWriter, request *http.Request) {
-	h.renderLogin(writer, request, http.StatusOK, LoginForm{
-		Next:              SafeRedirect(request.URL.Query().Get("next")),
-		AllowRegistration: h.allowRegistration,
-		Errors:            map[string]string{},
-	})
-}
-
-func (h *HTTP) Login(writer http.ResponseWriter, request *http.Request) {
+func (handler *HTTP) Login(writer http.ResponseWriter, request *http.Request) {
 	if !parseForm(writer, request) {
 		return
 	}
 	form := LoginForm{
-		Username:          user.NormalizeUsername(request.PostFormValue("username")),
-		RememberMe:        request.PostFormValue("remember_me") != "",
-		Next:              SafeRedirect(request.PostFormValue("next")),
-		AllowRegistration: h.allowRegistration,
-		Errors:            map[string]string{},
-	}
-	if err := user.ValidateUsername(form.Username); err != nil {
-		form.Errors["username"] = err.Error()
+		Username: strings.TrimSpace(request.PostFormValue("username")), SelectedLocation: strings.TrimSpace(request.PostFormValue("locationid")),
+		SelectedRole: strings.TrimSpace(request.PostFormValue("roleid")), RememberMe: request.PostFormValue("remember_me") != "",
+		Next: SafeRedirect(request.PostFormValue("next")), Errors: map[string]string{},
 	}
 	password := request.PostFormValue("password")
+	if form.Username == "" {
+		form.Errors["username"] = "username must not be empty"
+	}
 	if password == "" {
 		form.Errors["password"] = "password must not be empty"
-	} else if len(password) > auth.MaxPasswordBytes {
+	} else if len(password) > maxPasswordBytes {
 		form.Errors["password"] = "password is too long"
 	}
+	if form.SelectedLocation == "" {
+		form.Errors["locationid"] = "select a Fincloud location"
+	}
+	if form.SelectedRole == "" {
+		form.Errors["roleid"] = "select a Fincloud role"
+	}
 	if len(form.Errors) != 0 {
-		h.renderLogin(writer, request, http.StatusUnprocessableEntity, form)
+		if handler.loadLabels(writer, request, &form) {
+			handler.renderLogin(writer, request, http.StatusUnprocessableEntity, form)
+		}
 		return
 	}
 
-	result, err := h.service.Login(request.Context(), LoginInput{Username: form.Username, Password: password, RememberMe: form.RememberMe}, time.Now().UTC())
-	if errors.Is(err, ErrInvalidCredentials) {
-		h.appendBestEffortAudit(request, audit.Event{
-			Action: audit.ActionAuthLoginFailed, Metadata: audit.LoginFailedMetadata{Username: form.Username}, CreatedAt: time.Now().UTC(),
-		})
-		form.Errors["credentials"] = "Invalid username or password."
-		h.renderLogin(writer, request, http.StatusUnprocessableEntity, form)
+	result, err := handler.service.Login(request.Context(), LoginInput{Username: form.Username, Password: password, LocationID: form.SelectedLocation, RoleID: form.SelectedRole, RememberMe: form.RememberMe}, time.Now().UTC())
+	if errors.Is(err, ErrInvalidCredentials) || errors.Is(err, ErrInactiveUser) {
+		handler.appendBestEffortAudit(request, audit.Event{Action: audit.ActionAuthLoginFailed, Metadata: audit.LoginFailedMetadata{Username: form.Username}, CreatedAt: time.Now().UTC()})
+		form.Errors["credentials"] = "Authentication failed. Check your Fincloud credentials, location, role, and THOR access."
+		if handler.loadLabels(writer, request, &form) {
+			handler.renderLogin(writer, request, http.StatusUnprocessableEntity, form)
+		}
 		return
 	}
 	if err != nil {
-		h.internalError(writer, request, "login", err)
+		handler.internalError(writer, request, "Fincloud login", err)
 		return
 	}
-	identity := audit.Identity{UserID: result.Session.UserID, Username: form.Username}
-	h.appendBestEffortAudit(request, audit.Event{
-		Attribution: audit.Attribution{Actor: &identity, Effective: &identity},
-		Action:      audit.ActionAuthLogin, Resource: audit.ResourceUser, ResourceID: identity.UserID, CreatedAt: time.Now().UTC(),
-	})
-	h.cookies.Set(writer, result.RawToken, result.Session.RememberMe, result.Session.CreatedAt)
+	identity := audit.Identity{UserID: result.User.ID, Username: result.User.Username}
+	if result.Provisioned {
+		handler.appendBestEffortAudit(request, audit.Event{Attribution: audit.Attribution{SystemActor: "system:fincloud-auth"}, Action: audit.ActionUserAutoProvisioned, Resource: audit.ResourceUser, ResourceID: result.User.ID, CreatedAt: time.Now().UTC()})
+	}
+	handler.appendBestEffortAudit(request, audit.Event{Attribution: audit.Attribution{Actor: &identity, Effective: &identity}, Action: audit.ActionAuthLogin, Resource: audit.ResourceUser, ResourceID: identity.UserID, CreatedAt: time.Now().UTC()})
+	handler.cookies.Set(writer, result.RawToken, result.Session.RememberMe, result.Session.CreatedAt)
 	http.Redirect(writer, request, form.Next, http.StatusSeeOther)
 }
 
-func (h *HTTP) RegisterPage(writer http.ResponseWriter, request *http.Request) {
-	h.renderRegister(writer, request, http.StatusOK, RegisterForm{Errors: map[string]string{}})
-}
-
-func (h *HTTP) Register(writer http.ResponseWriter, request *http.Request) {
-	if !parseForm(writer, request) {
-		return
-	}
-	form := RegisterForm{
-		Name:     strings.TrimSpace(request.PostFormValue("name")),
-		Username: user.NormalizeUsername(request.PostFormValue("username")),
-		Errors:   map[string]string{},
-	}
-	if err := user.ValidateName(form.Name); err != nil {
-		form.Errors["name"] = err.Error()
-	}
-	if err := user.ValidateUsername(form.Username); err != nil {
-		form.Errors["username"] = err.Error()
-	}
-	password := request.PostFormValue("password")
-	confirmation := request.PostFormValue("password_confirmation")
-	if err := auth.ValidatePassword(password); err != nil {
-		form.Errors["password"] = err.Error()
-	}
-	if password != confirmation {
-		form.Errors["password_confirmation"] = "password confirmation does not match"
-	}
-	if len(form.Errors) != 0 {
-		h.renderRegister(writer, request, http.StatusUnprocessableEntity, form)
-		return
-	}
-
-	created, err := h.service.Register(request.Context(), RegisterInput{
-		Name:                 form.Name,
-		Username:             form.Username,
-		Password:             password,
-		PasswordConfirmation: confirmation,
-	}, time.Now().UTC())
-	if errors.Is(err, user.ErrUsernameTaken) {
-		form.Errors["username"] = "Username is already taken."
-		h.renderRegister(writer, request, http.StatusUnprocessableEntity, form)
-		return
-	}
-	if err != nil {
-		h.internalError(writer, request, "register", err)
-		return
-	}
-	h.appendBestEffortAudit(request, audit.Event{
-		Action: audit.ActionAuthRegistration, Resource: audit.ResourceUser, ResourceID: created.ID, CreatedAt: time.Now().UTC(),
-	})
-	http.Redirect(writer, request, "/login?notice=registered", http.StatusSeeOther)
-}
-
-func (h *HTTP) Logout(writer http.ResponseWriter, request *http.Request) {
+func (handler *HTTP) Logout(writer http.ResponseWriter, request *http.Request) {
 	principal, hasPrincipal := CurrentPrincipal(request.Context())
-	rawToken, err := h.cookies.Read(request)
-	if errors.Is(err, http.ErrNoCookie) {
-		h.cookies.Clear(writer)
+	rawToken, err := handler.cookies.Read(request)
+	if errors.Is(err, http.ErrNoCookie) || err == nil && !validToken(rawToken) {
+		handler.cookies.Clear(writer)
 		http.Redirect(writer, request, "/login", http.StatusSeeOther)
 		return
 	}
 	if err != nil {
-		h.internalError(writer, request, "read logout cookie", err)
+		handler.internalError(writer, request, "read logout cookie", err)
 		return
 	}
-	if !validToken(rawToken) {
-		h.cookies.Clear(writer)
-		http.Redirect(writer, request, "/login", http.StatusSeeOther)
-		return
-	}
-	if err := h.service.Logout(request.Context(), auth.HashToken(rawToken)); err != nil {
-		h.internalError(writer, request, "logout", err)
+	if err := handler.service.Logout(request.Context(), auth.HashToken(rawToken)); err != nil {
+		handler.internalError(writer, request, "logout", err)
 		return
 	}
 	if hasPrincipal {
-		attribution := auditAttributionFromPrincipal(principal)
-		h.appendBestEffortAudit(request, audit.Event{
-			Attribution: attribution, Action: audit.ActionAuthLogout,
-			Resource: audit.ResourceUser, ResourceID: principal.Actor.UserID, CreatedAt: time.Now().UTC(),
-		})
+		handler.appendBestEffortAudit(request, audit.Event{Attribution: auditAttributionFromPrincipal(principal), Action: audit.ActionAuthLogout, Resource: audit.ResourceUser, ResourceID: principal.UserID, CreatedAt: time.Now().UTC()})
 	}
-	h.cookies.Clear(writer)
+	handler.cookies.Clear(writer)
 	http.Redirect(writer, request, "/login", http.StatusSeeOther)
 }
 
-func (h *HTTP) appendBestEffortAudit(request *http.Request, event audit.Event) {
-	if h.appendAudit == nil {
+func (handler *HTTP) loadLabels(writer http.ResponseWriter, request *http.Request, form *LoginForm) bool {
+	labels, err := handler.service.Labels(request.Context())
+	if err != nil {
+		handler.internalError(writer, request, "load Fincloud login options", err)
+		return false
+	}
+	form.Locations, form.Roles = labels.Locations, labels.Roles
+	return true
+}
+
+func (handler *HTTP) appendBestEffortAudit(request *http.Request, event audit.Event) {
+	if handler.appendAudit == nil {
 		return
 	}
-	if err := h.appendAudit(request.Context(), event); err != nil {
-		h.logger.WarnContext(request.Context(), "append authentication audit",
-			"request_id", middleware.GetReqID(request.Context()),
-			"method", request.Method,
-			"path", request.URL.Path,
-			"action", event.Action,
-			"error", err,
-		)
+	if err := handler.appendAudit(request.Context(), event); err != nil {
+		handler.logger.WarnContext(request.Context(), "append authentication audit", "request_id", middleware.GetReqID(request.Context()), "method", request.Method, "path", request.URL.Path, "action", event.Action, "error", err)
 	}
 }
 
-func (h *HTTP) renderLogin(writer http.ResponseWriter, request *http.Request, status int, form LoginForm) {
-	data := render.PageData{Title: "Login", AppName: h.appName, Notice: render.NoticeFromID(request.URL.Query().Get("notice")), Data: form}
-	if err := h.renderer.RenderPageWithLayout(writer, status, "login", "auth", data); err != nil {
-		h.internalError(writer, request, "render login page", err)
+func (handler *HTTP) renderLogin(writer http.ResponseWriter, request *http.Request, status int, form LoginForm) {
+	data := render.PageData{Title: "Login", AppName: handler.appName, Notice: render.NoticeFromID(request.URL.Query().Get("notice")), Data: form}
+	if err := handler.renderer.RenderPageWithLayout(writer, status, "login", "auth", data); err != nil {
+		handler.internalError(writer, request, "render login page", err)
 	}
 }
 
-func (h *HTTP) renderRegister(writer http.ResponseWriter, request *http.Request, status int, form RegisterForm) {
-	data := render.PageData{Title: "Register", AppName: h.appName, Data: form}
-	if err := h.renderer.RenderPageWithLayout(writer, status, "register", "auth", data); err != nil {
-		h.internalError(writer, request, "render registration page", err)
-	}
-}
-
-func (h *HTTP) internalError(writer http.ResponseWriter, request *http.Request, operation string, err error) {
-	h.errors.Internal(writer, request, operation, err)
+func (handler *HTTP) internalError(writer http.ResponseWriter, request *http.Request, operation string, err error) {
+	handler.errors.Internal(writer, request, operation, err)
 }
 
 func parseForm(writer http.ResponseWriter, request *http.Request) bool {

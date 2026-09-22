@@ -9,7 +9,7 @@ func TestPermissionSet(t *testing.T) {
 	}
 
 	set := NewPermissionSet([]string{"dashboard.view"})
-	if !set.Has("dashboard.view") || set.Has("users.view") {
+	if !set.Has("dashboard.view") || set.Has("reports.view") {
 		t.Fatal("permission set returned unexpected result")
 	}
 }

@@ -31,25 +31,25 @@ const (
 )
 
 type Config struct {
-	App      AppConfig
-	APIKey   string
-	Database DatabaseConfig
-	Session  SessionConfig
-	DWH      ExternalDatabaseConfig
-	MSO      ExternalDatabaseConfig
-	Fincloud FincloudConfig
-	Snapshot SnapshotConfig
-	SLIK     SLIKConfig
-	LPS      LPSConfig
+	App                     AppConfig
+	APIKey                  string
+	BootstrapAccessManagers string
+	Database                DatabaseConfig
+	Session                 SessionConfig
+	DWH                     ExternalDatabaseConfig
+	MSO                     ExternalDatabaseConfig
+	Fincloud                FincloudConfig
+	Snapshot                SnapshotConfig
+	SLIK                    SLIKConfig
+	LPS                     LPSConfig
 }
 
 type AppConfig struct {
-	Name              string
-	Environment       string
-	URL               string
-	Port              int
-	AllowRegistration bool
-	Timezone          string
+	Name        string
+	Environment string
+	URL         string
+	Port        int
+	Timezone    string
 }
 
 func (c AppConfig) Location() (*time.Location, error) { return time.LoadLocation(c.Timezone) }
@@ -132,10 +132,6 @@ func parse(lookup lookupEnv) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	allowRegistration, err := parseBool("ALLOW_REGISTRATION", value("ALLOW_REGISTRATION", "false"))
-	if err != nil {
-		return Config{}, err
-	}
 	sessionSecure, err := parseBool("SESSION_SECURE", value("SESSION_SECURE", "false"))
 	if err != nil {
 		return Config{}, err
@@ -181,14 +177,11 @@ func parse(lookup lookupEnv) (Config, error) {
 	}
 
 	config := Config{
-		APIKey: strings.TrimSpace(value("THOR_API_KEY", "")),
+		APIKey:                  strings.TrimSpace(value("THOR_API_KEY", "")),
+		BootstrapAccessManagers: strings.TrimSpace(value("THOR_BOOTSTRAP_ACCESS_MANAGERS", "")),
 		App: AppConfig{
-			Name:              strings.TrimSpace(value("APP_NAME", defaultAppName)),
-			Environment:       strings.TrimSpace(value("APP_ENV", defaultAppEnvironment)),
-			URL:               strings.TrimSpace(value("APP_URL", defaultAppURL)),
-			Port:              appPort,
-			AllowRegistration: allowRegistration,
-			Timezone:          strings.TrimSpace(value("APP_TIMEZONE", defaultAppTimezone)),
+			Name: strings.TrimSpace(value("APP_NAME", defaultAppName)), Environment: strings.TrimSpace(value("APP_ENV", defaultAppEnvironment)),
+			URL: strings.TrimSpace(value("APP_URL", defaultAppURL)), Port: appPort, Timezone: strings.TrimSpace(value("APP_TIMEZONE", defaultAppTimezone)),
 		},
 		Database: DatabaseConfig{
 			Host:     strings.TrimSpace(value("DB_HOST", defaultDatabaseHost)),

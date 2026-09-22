@@ -1,4 +1,4 @@
-.PHONY: dev frontend-build build test test-integration fmt lint migrate migrate-down migrate-status migrate-create admin rename-module feature verify
+.PHONY: dev frontend-build build test test-integration fmt lint migrate migrate-down migrate-status migrate-create rename-module feature verify
 
 dev:
 	@test -x ./node_modules/.bin/tailwindcss || (echo "run 'npm install' first"; exit 1)
@@ -51,9 +51,6 @@ migrate-status:
 migrate-create:
 	@test -n "$(name)" || (echo "usage: make migrate-create name=create_users"; exit 1)
 	go run ./cmd/migrate create "$(name)"
-
-admin:
-	go run ./cmd/app admin create
 
 rename-module:
 	@test -n "$(module)" || (echo "usage: make rename-module module=github.com/example/project"; exit 1)

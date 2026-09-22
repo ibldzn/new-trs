@@ -47,9 +47,8 @@ func (handler *Handler) Refresh(writer http.ResponseWriter, request *http.Reques
 		handler.admin.Internal(writer, request, "manual snapshot refresh", errors.New("principal missing"))
 		return
 	}
-	actor := audit.Identity{UserID: principal.Actor.UserID, Username: principal.Actor.Username}
-	effective := audit.Identity{UserID: principal.UserID, Username: principal.Username}
-	_, err := handler.service.Refresh(request.Context(), snapshot.TriggerManual, audit.Attribution{Actor: &actor, Effective: &effective})
+	identity := audit.Identity{UserID: principal.UserID, Username: principal.Username}
+	_, err := handler.service.Refresh(request.Context(), snapshot.TriggerManual, audit.Attribution{Actor: &identity, Effective: &identity})
 	if errors.Is(err, snapshot.ErrRefreshInProgress) {
 		http.Redirect(writer, request, "/snapshot?notice=snapshot-refresh-running", http.StatusSeeOther)
 		return

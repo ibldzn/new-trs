@@ -3,15 +3,12 @@ package fincloud
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
-	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
-	"os"
 	"strings"
 	"time"
 
@@ -63,28 +60,9 @@ func NewClient(config Config) (*Client, error) {
 	}
 	httpClient := config.HTTPClient
 	if httpClient == nil {
-		tlsConfig := &tls.Config{MinVersion: tls.VersionTLS12, InsecureSkipVerify: config.InsecureTLS} //nolint:gosec // explicit emergency setting; false by default
-		if config.CAFile != "" {
-			certificate, err := os.ReadFile(config.CAFile)
-			if err != nil {
-				return nil, fmt.Errorf("read Fincloud CA file: %w", err)
-			}
-			pool, err := x509.SystemCertPool()
-			if err != nil {
-				return nil, fmt.Errorf("load system CA pool: %w", err)
-			}
-			if !pool.AppendCertsFromPEM(certificate) {
-				return nil, fmt.Errorf("FINCLOUD_CA_FILE contains no valid certificates")
-			}
-			tlsConfig.RootCAs = pool
-		}
-		httpClient = &http.Client{
-			Timeout: config.Timeout,
-			Transport: &http.Transport{
-				Proxy: http.ProxyFromEnvironment, TLSClientConfig: tlsConfig,
-				MaxIdleConns: 50, MaxIdleConnsPerHost: 20, MaxConnsPerHost: 32, IdleConnTimeout: 90 * time.Second,
-				TLSHandshakeTimeout: 10 * time.Second, ResponseHeaderTimeout: config.Timeout,
-			},
+		httpClient, err = newHTTPClient(config.CAFile, config.InsecureTLS, config.Timeout)
+		if err != nil {
+			return nil, err
 		}
 	}
 	client := &Client{

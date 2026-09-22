@@ -4,7 +4,6 @@ import (
 	"errors"
 	"net/http"
 
-	"github.com/ibldzn/trs/internal/access"
 	"github.com/ibldzn/trs/internal/browserauth"
 	"github.com/ibldzn/trs/internal/platform/navigation"
 	"github.com/ibldzn/trs/internal/render"
@@ -46,21 +45,6 @@ func (handler *Shell) RequirePermission(permission string) func(http.Handler) ht
 			next.ServeHTTP(writer, request)
 		})
 	}
-}
-
-func (handler *Shell) RequireImpersonationActorAdmin(next http.Handler) http.Handler {
-	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
-		principal, ok := browserauth.CurrentPrincipal(request.Context())
-		if !ok {
-			handler.errors.Internal(writer, request, "impersonation actor middleware", errors.New("principal missing from request context"))
-			return
-		}
-		if !access.IsAdminRole(principal.Actor.RoleSlug) {
-			handler.RenderPage(writer, request, http.StatusForbidden, "forbidden", "Forbidden", nil)
-			return
-		}
-		next.ServeHTTP(writer, request)
-	})
 }
 
 func (handler *Shell) RenderPage(writer http.ResponseWriter, request *http.Request, status int, page, title string, data any) {

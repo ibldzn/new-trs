@@ -28,7 +28,7 @@ func TestStableActionsAreUnique(t *testing.T) {
 		ActionAuthLogin, ActionAuthLoginFailed, ActionAuthLogout, ActionAuthRegistration,
 		ActionImpersonationStarted, ActionImpersonationStopped,
 		ActionUserCreated, ActionUserProfileUpdated, ActionUserRoleChanged,
-		ActionUserActivated, ActionUserDeactivated, ActionUserPasswordReset,
+		ActionUserActivated, ActionUserDeactivated, ActionUserAutoProvisioned, ActionUserPermissionsUpdated, ActionAccessBootstrap, ActionUserPasswordReset,
 		ActionRoleCreated, ActionRoleUpdated, ActionRoleDeleted, ActionRolePermissionsUpdated,
 		ActionAdminBootstrap,
 		ActionLoanInquiry, ActionAPILoanLookup, ActionReportingGenerate, ActionLPSGenerate,
@@ -50,7 +50,7 @@ func TestMetadataIsTypedAndSecretFree(t *testing.T) {
 	metadata := []Metadata{
 		RoleChangeMetadata{FromRole: "user", ToRole: "manager"},
 		StatusChangeMetadata{From: "active", To: "inactive"},
-		PermissionsUpdatedMetadata{Added: []string{"users.view"}, Removed: []string{"roles.view"}},
+		PermissionsUpdatedMetadata{Added: []string{"reporting.generate"}, Removed: []string{"audit.view"}},
 		ImpersonationStartedMetadata{TargetRole: "manager"},
 		LoginFailedMetadata{Username: "member"},
 		LoanInquiryMetadata{AccountNumber: "1", AsOf: "2026-09-14", Source: "DWH"},

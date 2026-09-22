@@ -69,21 +69,21 @@ func (store *memoryStore) Create(_ context.Context, job Job, accounts []string) 
 	}
 	return nil
 }
-func (store *memoryStore) Get(_ context.Context, id string, owner uint64, admin bool) (Job, error) {
+func (store *memoryStore) Get(_ context.Context, id string, owner uint64, viewAll bool) (Job, error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	job, ok := store.jobs[id]
-	if !ok || (!admin && job.OwnerID != owner) {
+	if !ok || (!viewAll && job.OwnerID != owner) {
 		return Job{}, ErrNotFound
 	}
 	return job, nil
 }
-func (store *memoryStore) History(_ context.Context, owner uint64, admin bool) ([]Job, error) {
+func (store *memoryStore) History(_ context.Context, owner uint64, viewAll bool) ([]Job, error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	var jobs []Job
 	for _, job := range store.jobs {
-		if admin || job.OwnerID == owner {
+		if viewAll || job.OwnerID == owner {
 			jobs = append(jobs, job)
 		}
 	}
@@ -188,11 +188,11 @@ func (store *memoryStore) Terminal(_ context.Context, id, status, account, reaso
 	store.jobs[id] = job
 	return nil
 }
-func (store *memoryStore) Cancel(_ context.Context, id string, owner uint64, admin bool) error {
+func (store *memoryStore) Cancel(_ context.Context, id string, owner uint64, viewAll bool) error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	job, ok := store.jobs[id]
-	if !ok || (!admin && job.OwnerID != owner) {
+	if !ok || (!viewAll && job.OwnerID != owner) {
 		return ErrNotFound
 	}
 	if job.Status == "QUEUED" || job.Status == "PROCESSING" {

@@ -67,7 +67,7 @@ func (h *HTTP) RequireAuth(next http.Handler) http.Handler {
 func (h *HTTP) RequireGuest(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 		if _, ok := CurrentPrincipal(request.Context()); ok {
-			http.Redirect(writer, request, "/", http.StatusSeeOther)
+			http.Redirect(writer, request, "/loans/inquiry", http.StatusSeeOther)
 			return
 		}
 		next.ServeHTTP(writer, request)
@@ -77,7 +77,7 @@ func (h *HTTP) RequireGuest(next http.Handler) http.Handler {
 func SafeRedirect(target string) string {
 	parsed, err := url.Parse(target)
 	if err != nil || target == "" || !strings.HasPrefix(target, "/") || strings.HasPrefix(target, "//") || strings.Contains(target, `\`) || strings.HasPrefix(parsed.Path, "//") || strings.Contains(parsed.Path, `\`) || parsed.IsAbs() || parsed.Host != "" || parsed.Opaque != "" || parsed.Fragment != "" {
-		return "/"
+		return "/loans/inquiry"
 	}
 	return target
 }

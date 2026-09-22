@@ -18,15 +18,15 @@ import (
 
 const (
 	permissionDashboard = "dashboard.view"
-	permissionUsers     = "users.view"
-	permissionRoles     = "roles.view"
+	permissionCustomers = "customers.view"
+	permissionReports   = "reports.view"
 )
 
 func testPermissions() []access.PermissionDefinition {
 	return []access.PermissionDefinition{
 		{Key: permissionDashboard, Name: "Dashboard", Group: "General"},
-		{Key: permissionUsers, Name: "Users", Group: "Management"},
-		{Key: permissionRoles, Name: "Roles", Group: "Management"},
+		{Key: permissionCustomers, Name: "Customers", Group: "Operations"},
+		{Key: permissionReports, Name: "Reports", Group: "Operations"},
 	}
 }
 
@@ -57,34 +57,34 @@ func TestAdminShellRendersFilteredNestedNavigation(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	registry, err := navigation.NewRegistry([]navigation.Group{{Key: "management", Label: "Management", Items: []navigation.Item{
-		{Key: "access", Label: "Access Control", Children: []navigation.Item{
-			{Key: "roles", Label: "Roles", Path: "/roles", Permission: permissionRoles, Match: navigation.MatchPrefix},
-			{Key: "users", Label: "Users", Path: "/users", Permission: permissionUsers, Match: navigation.MatchPrefix},
+	registry, err := navigation.NewRegistry([]navigation.Group{{Key: "operations", Label: "Operations", Items: []navigation.Item{
+		{Key: "work", Label: "Work", Children: []navigation.Item{
+			{Key: "reports", Label: "Reports", Path: "/reports", Permission: permissionReports, Match: navigation.MatchPrefix},
+			{Key: "customers", Label: "Customers", Path: "/customers", Permission: permissionCustomers, Match: navigation.MatchPrefix},
 		}},
 	}}}, testPermissions())
 	if err != nil {
 		t.Fatal(err)
 	}
-	principal := browserauth.Principal{Username: "viewer", Name: "Viewer", RoleSlug: access.UserRoleSlug, Permissions: access.NewPermissionSet([]string{permissionRoles})}
+	principal := browserauth.Principal{Username: "viewer", Name: "Viewer", Permissions: access.NewPermissionSet([]string{permissionReports})}
 	data := PageData{
-		Title:       "Roles",
+		Title:       "Reports",
 		AppName:     "Go Admin",
 		Principal:   principal,
-		Navigation:  registry.Prepare("/roles/7", principal.Can),
-		CurrentPath: "/roles/7",
+		Navigation:  registry.Prepare("/reports/7", principal.Can),
+		CurrentPath: "/reports/7",
 	}
 	response := httptest.NewRecorder()
 	if err := renderer.RenderPage(response, http.StatusOK, "features/dashboard/index", data); err != nil {
 		t.Fatal(err)
 	}
 	body := response.Body.String()
-	for _, expected := range []string{"Management", "Access Control", "Roles", `aria-current="page"`, `aria-expanded="true"`, `id="nav-children-access"`, `data-navigation-key="access"`, `data-navigation-active="true"`, `data-navigation-manual-open="false"`, `method="post" action="/logout"`} {
+	for _, expected := range []string{"Operations", "Work", "Reports", `aria-current="page"`, `aria-expanded="true"`, `id="nav-children-work"`, `data-navigation-key="work"`, `data-navigation-active="true"`, `data-navigation-manual-open="false"`, `method="post" action="/logout"`} {
 		if !strings.Contains(body, expected) {
 			t.Errorf("response does not contain %q", expected)
 		}
 	}
-	if strings.Contains(body, ">Users<") {
+	if strings.Contains(body, ">Customers<") {
 		t.Fatal("unauthorized navigation item rendered")
 	}
 	for _, key := range []string{"sidebar-collapsed", "sidebar-disclosures"} {

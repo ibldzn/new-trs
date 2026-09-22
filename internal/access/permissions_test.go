@@ -6,7 +6,7 @@ import (
 )
 
 func TestPermissionRegistryValidation(t *testing.T) {
-	valid := PermissionDefinition{Key: "users.view", Name: "View Users", Group: "Users"}
+	valid := PermissionDefinition{Key: "records.view", Name: "View Records", Group: "Records"}
 	tests := []struct {
 		name        string
 		definitions []PermissionDefinition
@@ -15,8 +15,8 @@ func TestPermissionRegistryValidation(t *testing.T) {
 		{"duplicate", []PermissionDefinition{valid, valid}, "duplicate"},
 		{"empty key", []PermissionDefinition{{Name: "Name", Group: "Group"}}, "invalid key"},
 		{"malformed key", []PermissionDefinition{{Key: "Users.View", Name: "Name", Group: "Group"}}, "invalid key"},
-		{"empty name", []PermissionDefinition{{Key: "users.view", Group: "Users"}}, "empty name"},
-		{"empty group", []PermissionDefinition{{Key: "users.view", Name: "View Users"}}, "empty group"},
+		{"empty name", []PermissionDefinition{{Key: "records.view", Group: "Records"}}, "empty name"},
+		{"empty group", []PermissionDefinition{{Key: "records.view", Name: "View Records"}}, "empty group"},
 	}
 
 	for _, test := range tests {

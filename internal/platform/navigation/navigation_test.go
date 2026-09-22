@@ -10,15 +10,15 @@ import (
 
 const (
 	permissionDashboard = "dashboard.view"
-	permissionUsers     = "users.view"
-	permissionRoles     = "roles.view"
+	permissionCustomers = "customers.view"
+	permissionReports   = "reports.view"
 )
 
 func testPermissions() []access.PermissionDefinition {
 	return []access.PermissionDefinition{
 		{Key: permissionDashboard, Name: "Dashboard", Group: "General"},
-		{Key: permissionUsers, Name: "Users", Group: "Management"},
-		{Key: permissionRoles, Name: "Roles", Group: "Management"},
+		{Key: permissionCustomers, Name: "Customers", Group: "Operations"},
+		{Key: permissionReports, Name: "Reports", Group: "Operations"},
 	}
 }
 
@@ -81,12 +81,12 @@ func TestNavigationFilteringAndActiveState(t *testing.T) {
 		{Key: "general", Label: "General", Items: []Item{
 			{Key: "dashboard", Label: "Dashboard", Path: "/", Permission: permissionDashboard, Match: MatchExact},
 		}},
-		{Key: "management", Label: "Management", Items: []Item{
-			{Key: "access", Label: "Access Control", Children: []Item{
-				{Key: "roles", Label: "Roles", Children: []Item{
-					{Key: "role-list", Label: "Role list", Path: "/roles", Permission: permissionRoles, Match: MatchPrefix},
+		{Key: "operations", Label: "Operations", Items: []Item{
+			{Key: "work", Label: "Work", Children: []Item{
+				{Key: "reports", Label: "Reports", Children: []Item{
+					{Key: "report-list", Label: "Report list", Path: "/reports", Permission: permissionReports, Match: MatchPrefix},
 				}},
-				{Key: "users", Label: "Users", Path: "/users", Permission: permissionUsers, Match: MatchPrefix},
+				{Key: "customers", Label: "Customers", Path: "/customers", Permission: permissionCustomers, Match: MatchPrefix},
 			}},
 		}},
 	}, testPermissions())
@@ -94,17 +94,17 @@ func TestNavigationFilteringAndActiveState(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	onlyRoles := registry.Prepare("/roles/7/edit", func(key string) bool { return key == permissionRoles })
-	if len(onlyRoles) != 1 || onlyRoles[0].Key != "management" || len(onlyRoles[0].Items) != 1 {
-		t.Fatalf("unexpected filtered groups: %+v", onlyRoles)
+	onlyReports := registry.Prepare("/reports/7/edit", func(key string) bool { return key == permissionReports })
+	if len(onlyReports) != 1 || onlyReports[0].Key != "operations" || len(onlyReports[0].Items) != 1 {
+		t.Fatalf("unexpected filtered groups: %+v", onlyReports)
 	}
-	accessItem := onlyRoles[0].Items[0]
-	roleContainer := accessItem.Children[0]
-	roleLeaf := roleContainer.Children[0]
-	if !accessItem.Active || !accessItem.Open || !roleContainer.Active || !roleContainer.Open || !roleLeaf.Active {
-		t.Fatalf("active ancestors not prepared: %+v", accessItem)
+	workItem := onlyReports[0].Items[0]
+	reportContainer := workItem.Children[0]
+	reportLeaf := reportContainer.Children[0]
+	if !workItem.Active || !workItem.Open || !reportContainer.Active || !reportContainer.Open || !reportLeaf.Active {
+		t.Fatalf("active ancestors not prepared: %+v", workItem)
 	}
-	inactive := registry.Prepare("/", func(key string) bool { return key == permissionRoles })
+	inactive := registry.Prepare("/", func(key string) bool { return key == permissionReports })
 	if len(inactive) != 1 || inactive[0].Items[0].Active || inactive[0].Items[0].Open {
 		t.Fatalf("inactive ancestors must render closed: %+v", inactive)
 	}
@@ -114,7 +114,7 @@ func TestNavigationFilteringAndActiveState(t *testing.T) {
 		t.Fatalf("expected empty navigation, got %+v", none)
 	}
 
-	all := registry.Prepare("/users", func(string) bool { return true })
+	all := registry.Prepare("/customers", func(string) bool { return true })
 	if len(all) != 2 || len(all[1].Items[0].Children) != 2 {
 		t.Fatalf("expected all navigation, got %+v", all)
 	}
@@ -123,7 +123,7 @@ func TestNavigationFilteringAndActiveState(t *testing.T) {
 func TestNavigationMatchModes(t *testing.T) {
 	registry, err := NewRegistry([]Group{{Key: "general", Label: "General", Items: []Item{
 		{Key: "dashboard", Label: "Dashboard", Path: "/", Permission: permissionDashboard, Match: MatchExact},
-		{Key: "users", Label: "Users", Path: "/users", Permission: permissionUsers, Match: MatchPrefix},
+		{Key: "customers", Label: "Customers", Path: "/customers", Permission: permissionCustomers, Match: MatchPrefix},
 	}}}, testPermissions())
 	if err != nil {
 		t.Fatal(err)
@@ -134,9 +134,9 @@ func TestNavigationMatchModes(t *testing.T) {
 		activeKey string
 	}{
 		{path: "/", activeKey: "dashboard"},
-		{path: "/users", activeKey: "users"},
-		{path: "/users/123/edit", activeKey: "users"},
-		{path: "/users2"},
+		{path: "/customers", activeKey: "customers"},
+		{path: "/customers/123/edit", activeKey: "customers"},
+		{path: "/customers2"},
 		{path: "/other"},
 	}
 	for _, test := range tests {
@@ -152,7 +152,7 @@ func TestNavigationMatchModes(t *testing.T) {
 		}
 	}
 
-	requestURL, err := url.Parse("/users?page=2")
+	requestURL, err := url.Parse("/customers?page=2")
 	if err != nil {
 		t.Fatal(err)
 	}

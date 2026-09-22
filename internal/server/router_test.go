@@ -16,9 +16,9 @@ import (
 	"github.com/ibldzn/trs/internal/audit"
 	"github.com/ibldzn/trs/internal/auth"
 	"github.com/ibldzn/trs/internal/browserauth"
+	"github.com/ibldzn/trs/internal/fincloud"
 	"github.com/ibldzn/trs/internal/loan"
 	"github.com/ibldzn/trs/internal/render"
-	"github.com/ibldzn/trs/internal/user"
 	webfiles "github.com/ibldzn/trs/web"
 )
 
@@ -36,8 +36,8 @@ func (fakeAPIPositions) GetLoanPosition(context.Context, string, loan.Date) (loa
 func (*fakeAuthentication) Login(context.Context, browserauth.LoginInput, time.Time) (browserauth.LoginResult, error) {
 	return browserauth.LoginResult{}, browserauth.ErrInvalidCredentials
 }
-func (*fakeAuthentication) Register(context.Context, browserauth.RegisterInput, time.Time) (user.User, error) {
-	return user.User{}, nil
+func (*fakeAuthentication) Labels(context.Context) (fincloud.AuthLabels, error) {
+	return fincloud.AuthLabels{}, nil
 }
 func (service *fakeAuthentication) ResolveSession(context.Context, [32]byte, time.Time) (browserauth.Principal, error) {
 	service.resolved++
@@ -46,7 +46,7 @@ func (service *fakeAuthentication) ResolveSession(context.Context, [32]byte, tim
 func (*fakeAuthentication) Logout(context.Context, [32]byte) error { return nil }
 
 func TestRouterOwnsInfrastructureOnly(t *testing.T) {
-	service := &fakeAuthentication{principal: browserauth.Principal{UserID: 1, Username: "admin", Actor: browserauth.Identity{UserID: 1, Username: "admin"}}}
+	service := &fakeAuthentication{principal: browserauth.Principal{UserID: 1, Username: "admin"}}
 	router, token := testRouter(t, service, nil)
 	health := httptest.NewRecorder()
 	router.ServeHTTP(health, httptest.NewRequest(http.MethodGet, "/health", nil))
@@ -60,10 +60,17 @@ func TestRouterOwnsInfrastructureOnly(t *testing.T) {
 	if missing.Code != http.StatusNotFound || missing.Header().Get("Cache-Control") != "no-store" {
 		t.Fatalf("global feature route still exists: status=%d headers=%v", missing.Code, missing.Header())
 	}
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		response := httptest.NewRecorder()
+		router.ServeHTTP(response, httptest.NewRequest(method, "/register", nil))
+		if response.Code != http.StatusNotFound {
+			t.Fatalf("registration route remains: method=%s status=%d", method, response.Code)
+		}
+	}
 }
 
 func TestAuthenticatedFeatureCallback(t *testing.T) {
-	service := &fakeAuthentication{principal: browserauth.Principal{UserID: 1, Username: "admin", Actor: browserauth.Identity{UserID: 1, Username: "admin"}}}
+	service := &fakeAuthentication{principal: browserauth.Principal{UserID: 1, Username: "admin"}}
 	registered := 0
 	router, token := testRouter(t, service, func(router chi.Router) {
 		registered++
@@ -98,7 +105,7 @@ func TestStaticAndCrossOriginBoundaries(t *testing.T) {
 }
 
 func TestAPIRouteIsolation(t *testing.T) {
-	service := &fakeAuthentication{principal: browserauth.Principal{UserID: 1, Username: "admin", Actor: browserauth.Identity{UserID: 1, Username: "admin"}}}
+	service := &fakeAuthentication{principal: browserauth.Principal{UserID: 1, Username: "admin"}}
 	path := "/api/v1/loans/primary/contractual?as_of=2026-01-01"
 	disabled, _ := testRouter(t, service, nil)
 	response := httptest.NewRecorder()
@@ -145,7 +152,7 @@ func testRouter(t *testing.T, service *fakeAuthentication, register func(chi.Rou
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	errors := render.NewErrorResponder(renderer, "Test", logger)
 	cookies := browserauth.NewCookieManager("session", false, time.Hour)
-	authentication := browserauth.NewHTTP(service, renderer, cookies, "Test", false, logger, func(context.Context, audit.Event) error { return nil }, errors)
+	authentication := browserauth.NewHTTP(service, renderer, cookies, "Test", logger, func(context.Context, audit.Event) error { return nil }, errors)
 	staticFiles, err := fs.Sub(webfiles.Files, "static")
 	if err != nil {
 		t.Fatal(err)

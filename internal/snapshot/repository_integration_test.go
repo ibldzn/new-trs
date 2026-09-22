@@ -5,28 +5,16 @@ package snapshot
 import (
 	"context"
 	"errors"
-	"path/filepath"
 	"testing"
 	"time"
-
-	"github.com/pressly/goose/v3"
 
 	"github.com/ibldzn/trs/internal/loan"
 	"github.com/ibldzn/trs/internal/testutil/integrationdb"
 )
 
-func TestPenaltyArrearsMigrationUpgradesExistingSnapshot(t *testing.T) {
+func TestPenaltyArrearsSchemaDefaultsAndRejectsNegativeValues(t *testing.T) {
 	database := integrationdb.Open(t)
 	ctx := context.Background()
-	migrations := filepath.Join(integrationdb.Root(t), "migrations")
-	if err := goose.DownToContext(ctx, database.DB, migrations, 202609180001); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		if err := goose.UpContext(context.Background(), database.DB, migrations); err != nil {
-			t.Errorf("restore migrations: %v", err)
-		}
-	})
 	if _, err := database.ExecContext(ctx, `DELETE FROM current_loan_position_snapshot`); err != nil {
 		t.Fatal(err)
 	}
@@ -34,9 +22,6 @@ func TestPenaltyArrearsMigrationUpgradesExistingSnapshot(t *testing.T) {
 		INSERT INTO current_loan_position_snapshot
 		(account_number, as_of_date, loan_start_date, principal_outstanding, collectability_bi, principal_arrears, interest_arrears, refreshed_at)
 		VALUES ('existing', '2026-09-14', '2024-06-01', 20, 2, 2, 1, UTC_TIMESTAMP(6))`); err != nil {
-		t.Fatal(err)
-	}
-	if err := goose.UpContext(ctx, database.DB, migrations); err != nil {
 		t.Fatal(err)
 	}
 	var penalty loan.Money

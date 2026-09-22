@@ -86,10 +86,10 @@ func (repository *Repository) Create(ctx context.Context, job Job, accounts []st
 	return transaction.Commit()
 }
 
-func (repository *Repository) Get(ctx context.Context, id string, ownerID uint64, admin bool) (Job, error) {
+func (repository *Repository) Get(ctx context.Context, id string, ownerID uint64, viewAll bool) (Job, error) {
 	query := `SELECT ` + jobColumns + ` FROM slik_jobs WHERE id = ?`
 	args := []any{id}
-	if !admin {
+	if !viewAll {
 		query += ` AND owner_user_id = ?`
 		args = append(args, ownerID)
 	}
@@ -103,10 +103,10 @@ func (repository *Repository) Get(ctx context.Context, id string, ownerID uint64
 	return job, nil
 }
 
-func (repository *Repository) History(ctx context.Context, ownerID uint64, admin bool) ([]Job, error) {
+func (repository *Repository) History(ctx context.Context, ownerID uint64, viewAll bool) ([]Job, error) {
 	query := `SELECT ` + jobColumns + ` FROM slik_jobs`
 	args := []any{}
-	if !admin {
+	if !viewAll {
 		query += ` WHERE owner_user_id = ?`
 		args = append(args, ownerID)
 	}
@@ -227,18 +227,18 @@ func (repository *Repository) Terminal(ctx context.Context, jobID, status, accou
 	return nil
 }
 
-func (repository *Repository) Cancel(ctx context.Context, id string, ownerID uint64, admin bool) error {
+func (repository *Repository) Cancel(ctx context.Context, id string, ownerID uint64, viewAll bool) error {
 	query := `UPDATE slik_jobs SET status='CANCELED', finished_at=UTC_TIMESTAMP(6), expires_at=DATE_ADD(UTC_TIMESTAMP(6), INTERVAL 7 DAY)
 	 WHERE id=? AND status IN ('QUEUED','PROCESSING')`
 	args := []any{id}
-	if !admin {
+	if !viewAll {
 		query += ` AND owner_user_id=?`
 		args = append(args, ownerID)
 	}
 	if _, err := repository.db.ExecContext(ctx, query, args...); err != nil {
 		return err
 	}
-	_, err := repository.Get(ctx, id, ownerID, admin)
+	_, err := repository.Get(ctx, id, ownerID, viewAll)
 	return err
 }
 

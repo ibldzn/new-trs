@@ -81,10 +81,9 @@ func (handler *Handler) Generate(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 	if handler.appendAudit != nil {
-		actor := audit.Identity{UserID: principal.Actor.UserID, Username: principal.Actor.Username}
-		effective := audit.Identity{UserID: principal.UserID, Username: principal.Username}
+		identity := audit.Identity{UserID: principal.UserID, Username: principal.Username}
 		err := handler.appendAudit(request.Context(), audit.Event{
-			Attribution: audit.Attribution{Actor: &actor, Effective: &effective}, Action: audit.ActionLPSGenerate,
+			Attribution: audit.Attribution{Actor: &identity, Effective: &identity}, Action: audit.ActionLPSGenerate,
 			Metadata: audit.LPSMetadata{ParticipantCode: input.ParticipantCode, ReportingDate: input.ReportingDate, RowCount: result.DNRows + result.DSNRows + result.DKRows}, CreatedAt: time.Now().UTC(),
 		})
 		if err != nil && handler.logger != nil {

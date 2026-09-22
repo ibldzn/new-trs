@@ -11,29 +11,35 @@ import (
 	"github.com/ibldzn/trs/internal/access"
 	"github.com/ibldzn/trs/internal/audit"
 	"github.com/ibldzn/trs/internal/auth"
+	"github.com/ibldzn/trs/internal/fincloud"
 	"github.com/ibldzn/trs/internal/securityctx"
 	"github.com/ibldzn/trs/internal/user"
 )
 
-const LastSeenTouchInterval = 5 * time.Minute
-
-var (
-	ErrInvalidCredentials   = errors.New("invalid username or password")
-	ErrUnauthenticated      = errors.New("unauthenticated")
-	ErrPasswordConfirmation = errors.New("password confirmation does not match")
+const (
+	LastSeenTouchInterval = 5 * time.Minute
+	maxPasswordBytes      = 1024
 )
 
+var (
+	ErrInvalidCredentials = errors.New("invalid username or password")
+	ErrInactiveUser       = errors.New("local THOR user is inactive")
+	ErrUnauthenticated    = errors.New("unauthenticated")
+)
+
+type fincloudAuthenticator interface {
+	Labels(context.Context) (fincloud.AuthLabels, error)
+	Authenticate(context.Context, string, string, string, string) error
+}
+
 type userStore interface {
-	Create(context.Context, user.CreateParams, time.Time) (user.User, error)
+	FindOrCreateFromAuthenticatedUsername(context.Context, string, time.Time) (user.User, bool, error)
 	FindByID(context.Context, uint64) (user.User, error)
-	FindByUsername(context.Context, string) (user.User, error)
 	UpdateLastLoginAt(context.Context, uint64, time.Time) error
 }
 
-type roleStore interface {
-	FindRoleByID(context.Context, uint64) (access.Role, error)
-	FindRoleBySlug(context.Context, string) (access.Role, error)
-	ListPermissionKeysForRole(context.Context, uint64) ([]string, error)
+type permissionStore interface {
+	ListPermissionKeysForUser(context.Context, uint64) ([]string, error)
 }
 
 type sessionStore interface {
@@ -44,13 +50,12 @@ type sessionStore interface {
 }
 
 type Service struct {
+	authenticator    fincloudAuthenticator
 	users            userStore
-	roles            roleStore
+	permissions      permissionStore
 	sessions         sessionStore
 	lifetime         time.Duration
 	rememberLifetime time.Duration
-	dummyHash        string
-	verifyPassword   func(string, string) (bool, error)
 	generateToken    func() (string, error)
 	logger           *slog.Logger
 }
@@ -58,277 +63,134 @@ type Service struct {
 type LoginInput struct {
 	Username   string
 	Password   string
+	LocationID string
+	RoleID     string
 	RememberMe bool
 }
 
 type LoginResult struct {
-	RawToken string
-	Session  auth.Session
-}
-
-type RegisterInput struct {
-	Name                 string
-	Username             string
-	Password             string
-	PasswordConfirmation string
-}
-
-type Identity struct {
-	UserID   uint64
-	Username string
-	Name     string
-	RoleID   uint64
-	RoleName string
-	RoleSlug string
+	RawToken    string
+	Session     auth.Session
+	User        user.User
+	Provisioned bool
 }
 
 type Principal struct {
-	UserID          uint64
-	Username        string
-	Name            string
-	RoleID          uint64
-	RoleName        string
-	RoleSlug        string
-	Permissions     access.PermissionSet
-	SessionID       uint64
-	RememberMe      bool
-	Actor           Identity
-	IsImpersonating bool
+	UserID      uint64
+	Username    string
+	Name        string
+	Permissions access.PermissionSet
+	SessionID   uint64
+	RememberMe  bool
 }
 
-func (principal Principal) Can(permission string) bool {
-	return access.IsAdminRole(principal.RoleSlug) || principal.Permissions.Has(permission)
-}
+func (principal Principal) Can(permission string) bool { return principal.Permissions.Has(permission) }
 
 func (principal Principal) SecurityContext() securityctx.Requester {
-	return securityctx.Requester{
-		Actor:             securityctx.Identity{UserID: principal.Actor.UserID, Username: principal.Actor.Username},
-		Effective:         securityctx.Identity{UserID: principal.UserID, Username: principal.Username},
-		EffectiveRoleID:   principal.RoleID,
-		EffectiveRoleSlug: principal.RoleSlug,
-		Permissions:       principal.Permissions,
-	}
+	return securityctx.Requester{UserID: principal.UserID, Username: principal.Username, Permissions: principal.Permissions}
 }
 
 func auditAttributionFromPrincipal(principal Principal) audit.Attribution {
-	actor := audit.Identity{UserID: principal.Actor.UserID, Username: principal.Actor.Username}
-	effective := audit.Identity{UserID: principal.UserID, Username: principal.Username}
-	return audit.Attribution{Actor: &actor, Effective: &effective}
+	identity := audit.Identity{UserID: principal.UserID, Username: principal.Username}
+	return audit.Attribution{Actor: &identity, Effective: &identity}
 }
 
-func NewService(
-	users userStore,
-	roles roleStore,
-	sessions sessionStore,
-	lifetime time.Duration,
-	rememberLifetime time.Duration,
-	logger *slog.Logger,
-) (*Service, error) {
+func NewService(authenticator fincloudAuthenticator, users userStore, permissions permissionStore, sessions sessionStore, lifetime, rememberLifetime time.Duration, logger *slog.Logger) (*Service, error) {
+	if authenticator == nil || users == nil || permissions == nil || sessions == nil {
+		return nil, fmt.Errorf("browser authentication dependencies are required")
+	}
 	if lifetime <= 0 || rememberLifetime <= 0 {
 		return nil, fmt.Errorf("session lifetimes must be positive")
-	}
-	dummyHash, err := auth.HashPassword("dummy authentication password")
-	if err != nil {
-		return nil, fmt.Errorf("create dummy password hash: %w", err)
 	}
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Service{
-		users:            users,
-		roles:            roles,
-		sessions:         sessions,
-		lifetime:         lifetime,
-		rememberLifetime: rememberLifetime,
-		dummyHash:        dummyHash,
-		verifyPassword:   auth.VerifyPassword,
-		generateToken:    auth.GenerateToken,
-		logger:           logger,
-	}, nil
+	return &Service{authenticator: authenticator, users: users, permissions: permissions, sessions: sessions, lifetime: lifetime, rememberLifetime: rememberLifetime, generateToken: auth.GenerateToken, logger: logger}, nil
 }
 
-func (s *Service) Login(ctx context.Context, input LoginInput, now time.Time) (LoginResult, error) {
-	input.Username = user.NormalizeUsername(input.Username)
-	if err := user.ValidateUsername(input.Username); err != nil || input.Password == "" || len(input.Password) > auth.MaxPasswordBytes {
+func (service *Service) Labels(ctx context.Context) (fincloud.AuthLabels, error) {
+	return service.authenticator.Labels(ctx)
+}
+
+func (service *Service) Login(ctx context.Context, input LoginInput, now time.Time) (LoginResult, error) {
+	fincloudUsername := strings.TrimSpace(input.Username)
+	if fincloudUsername == "" || input.Password == "" || len(input.Password) > maxPasswordBytes || strings.TrimSpace(input.LocationID) == "" || strings.TrimSpace(input.RoleID) == "" {
 		return LoginResult{}, ErrInvalidCredentials
 	}
-
-	found, err := s.users.FindByUsername(ctx, input.Username)
-	if errors.Is(err, user.ErrNotFound) {
-		if _, verifyErr := s.verifyPassword(input.Password, s.dummyHash); verifyErr != nil {
-			return LoginResult{}, fmt.Errorf("verify dummy password: %w", verifyErr)
+	if err := service.authenticator.Authenticate(ctx, fincloudUsername, input.Password, input.LocationID, input.RoleID); err != nil {
+		if errors.Is(err, fincloud.ErrInvalidCredentials) {
+			return LoginResult{}, ErrInvalidCredentials
 		}
-		return LoginResult{}, ErrInvalidCredentials
+		return LoginResult{}, fmt.Errorf("authenticate with Fincloud: %w", err)
 	}
+	canonicalUsername := user.NormalizeUsername(fincloudUsername)
+	if err := user.ValidateUsername(canonicalUsername); err != nil {
+		return LoginResult{}, fmt.Errorf("authenticated Fincloud username is not a valid THOR identity: %w", err)
+	}
+	found, provisioned, err := service.users.FindOrCreateFromAuthenticatedUsername(ctx, canonicalUsername, now.UTC())
 	if err != nil {
-		return LoginResult{}, fmt.Errorf("find login user: %w", err)
+		return LoginResult{}, fmt.Errorf("find or provision authenticated user: %w", err)
 	}
-
-	valid, err := s.verifyPassword(input.Password, found.PasswordHash)
-	if err != nil {
-		return LoginResult{}, fmt.Errorf("verify password: %w", err)
+	if !found.IsActive {
+		return LoginResult{}, ErrInactiveUser
 	}
-	if !valid || !found.IsActive {
-		return LoginResult{}, ErrInvalidCredentials
-	}
-
-	rawToken, err := s.generateToken()
+	rawToken, err := service.generateToken()
 	if err != nil {
 		return LoginResult{}, err
 	}
 	now = now.UTC()
-	lifetime := s.lifetime
+	lifetime := service.lifetime
 	if input.RememberMe {
-		lifetime = s.rememberLifetime
+		lifetime = service.rememberLifetime
 	}
-	session, err := s.sessions.Create(ctx, auth.CreateSessionParams{
-		UserID:     found.ID,
-		TokenHash:  auth.HashToken(rawToken),
-		RememberMe: input.RememberMe,
-		ExpiresAt:  now.Add(lifetime),
-		LastSeenAt: now,
-	}, now)
+	session, err := service.sessions.Create(ctx, auth.CreateSessionParams{UserID: found.ID, TokenHash: auth.HashToken(rawToken), RememberMe: input.RememberMe, ExpiresAt: now.Add(lifetime), LastSeenAt: now}, now)
 	if err != nil {
 		return LoginResult{}, fmt.Errorf("create browser session: %w", err)
 	}
-	if err := s.users.UpdateLastLoginAt(ctx, found.ID, now); err != nil {
-		s.logger.WarnContext(ctx, "update last login", "user_id", found.ID, "error", err)
+	if err := service.users.UpdateLastLoginAt(ctx, found.ID, now); err != nil {
+		service.logger.WarnContext(ctx, "update last login", "user_id", found.ID, "error", err)
 	}
-	return LoginResult{RawToken: rawToken, Session: session}, nil
+	return LoginResult{RawToken: rawToken, Session: session, User: found, Provisioned: provisioned}, nil
 }
 
-func (s *Service) Register(ctx context.Context, input RegisterInput, now time.Time) (user.User, error) {
-	input.Name = strings.TrimSpace(input.Name)
-	input.Username = user.NormalizeUsername(input.Username)
-	if err := user.ValidateName(input.Name); err != nil {
-		return user.User{}, err
-	}
-	if err := user.ValidateUsername(input.Username); err != nil {
-		return user.User{}, err
-	}
-	if input.Password != input.PasswordConfirmation {
-		return user.User{}, ErrPasswordConfirmation
-	}
-	passwordHash, err := auth.HashPassword(input.Password)
-	if err != nil {
-		return user.User{}, err
-	}
-	role, err := s.roles.FindRoleBySlug(ctx, access.UserRoleSlug)
-	if err != nil {
-		return user.User{}, fmt.Errorf("find registration role: %w", err)
-	}
-	created, err := s.users.Create(ctx, user.CreateParams{
-		Username:     input.Username,
-		Name:         input.Name,
-		PasswordHash: passwordHash,
-		RoleID:       role.ID,
-		IsActive:     true,
-	}, now.UTC())
-	if err != nil {
-		return user.User{}, fmt.Errorf("create registered user: %w", err)
-	}
-	return created, nil
-}
-
-func (s *Service) ResolveSession(ctx context.Context, tokenHash [32]byte, now time.Time) (Principal, error) {
+func (service *Service) ResolveSession(ctx context.Context, tokenHash [32]byte, now time.Time) (Principal, error) {
 	now = now.UTC()
-	session, err := s.sessions.FindValidByTokenHash(ctx, tokenHash, now)
+	session, err := service.sessions.FindValidByTokenHash(ctx, tokenHash, now)
 	if errors.Is(err, auth.ErrSessionNotFound) {
 		return Principal{}, ErrUnauthenticated
 	}
 	if err != nil {
 		return Principal{}, fmt.Errorf("find browser session: %w", err)
 	}
-
-	actor, found, err := s.findIdentity(ctx, session.UserID)
+	found, err := service.users.FindByID(ctx, session.UserID)
+	if errors.Is(err, user.ErrNotFound) || err == nil && !found.IsActive {
+		return Principal{}, service.revokeUnauthenticated(ctx, tokenHash)
+	}
 	if err != nil {
-		return Principal{}, fmt.Errorf("find session actor: %w", err)
+		return Principal{}, fmt.Errorf("find session user: %w", err)
 	}
-	if !found || !actor.User.IsActive {
-		return Principal{}, s.revokeUnauthenticated(ctx, tokenHash)
+	keys, err := service.permissions.ListPermissionKeysForUser(ctx, found.ID)
+	if err != nil {
+		return Principal{}, fmt.Errorf("list session user permissions: %w", err)
 	}
-
-	effective := actor
-	if session.ImpersonatedUserID != nil {
-		if !access.IsAdminRole(actor.Role.Slug) {
-			return Principal{}, s.revokeUnauthenticated(ctx, tokenHash)
-		}
-		effective, found, err = s.findIdentity(ctx, *session.ImpersonatedUserID)
-		if err != nil {
-			return Principal{}, fmt.Errorf("find impersonated session target: %w", err)
-		}
-		if !found || !effective.User.IsActive || access.IsAdminRole(effective.Role.Slug) {
-			return Principal{}, s.revokeUnauthenticated(ctx, tokenHash)
-		}
-	}
-	permissions := access.NewPermissionSet(nil)
-	if !access.IsAdminRole(effective.Role.Slug) {
-		keys, err := s.roles.ListPermissionKeysForRole(ctx, effective.Role.ID)
-		if err != nil {
-			return Principal{}, fmt.Errorf("list session role permissions: %w", err)
-		}
-		permissions = access.NewPermissionSet(keys)
-	}
+	keys = append(keys, access.PermissionLoanInquiry)
 	if now.Sub(session.LastSeenAt) >= LastSeenTouchInterval {
-		if err := s.sessions.UpdateLastSeenAt(ctx, session.ID, now); err != nil {
-			s.logger.WarnContext(ctx, "update session activity", "session_id", session.ID, "error", err)
+		if err := service.sessions.UpdateLastSeenAt(ctx, session.ID, now); err != nil {
+			service.logger.WarnContext(ctx, "update session activity", "session_id", session.ID, "error", err)
 		}
 	}
-
-	return Principal{
-		UserID:          effective.User.ID,
-		Username:        effective.User.Username,
-		Name:            effective.User.Name,
-		RoleID:          effective.Role.ID,
-		RoleName:        effective.Role.Name,
-		RoleSlug:        effective.Role.Slug,
-		Permissions:     permissions,
-		SessionID:       session.ID,
-		RememberMe:      session.RememberMe,
-		Actor:           actor.Identity(),
-		IsImpersonating: session.ImpersonatedUserID != nil,
-	}, nil
+	return Principal{UserID: found.ID, Username: found.Username, Name: found.Name, Permissions: access.NewPermissionSet(keys), SessionID: session.ID, RememberMe: session.RememberMe}, nil
 }
 
-type resolvedIdentity struct {
-	User user.User
-	Role access.Role
-}
-
-func (identity resolvedIdentity) Identity() Identity {
-	return Identity{
-		UserID: identity.User.ID, Username: identity.User.Username, Name: identity.User.Name,
-		RoleID: identity.Role.ID, RoleName: identity.Role.Name, RoleSlug: identity.Role.Slug,
-	}
-}
-
-func (s *Service) findIdentity(ctx context.Context, userID uint64) (resolvedIdentity, bool, error) {
-	found, err := s.users.FindByID(ctx, userID)
-	if errors.Is(err, user.ErrNotFound) {
-		return resolvedIdentity{}, false, nil
-	}
-	if err != nil {
-		return resolvedIdentity{}, false, err
-	}
-	role, err := s.roles.FindRoleByID(ctx, found.RoleID)
-	if errors.Is(err, access.ErrNotFound) {
-		return resolvedIdentity{}, false, nil
-	}
-	if err != nil {
-		return resolvedIdentity{}, false, err
-	}
-	return resolvedIdentity{User: found, Role: role}, true, nil
-}
-
-func (s *Service) Logout(ctx context.Context, tokenHash [32]byte) error {
-	if err := s.sessions.Revoke(ctx, tokenHash); err != nil {
+func (service *Service) Logout(ctx context.Context, tokenHash [32]byte) error {
+	if err := service.sessions.Revoke(ctx, tokenHash); err != nil {
 		return fmt.Errorf("revoke browser session: %w", err)
 	}
 	return nil
 }
 
-func (s *Service) revokeUnauthenticated(ctx context.Context, tokenHash [32]byte) error {
-	if err := s.sessions.Revoke(ctx, tokenHash); err != nil {
+func (service *Service) revokeUnauthenticated(ctx context.Context, tokenHash [32]byte) error {
+	if err := service.sessions.Revoke(ctx, tokenHash); err != nil {
 		return fmt.Errorf("revoke unusable session: %w", err)
 	}
 	return ErrUnauthenticated

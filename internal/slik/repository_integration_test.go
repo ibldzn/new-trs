@@ -8,14 +8,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ibldzn/trs/internal/access"
 	"github.com/ibldzn/trs/internal/testutil/integrationdb"
 )
 
 func TestRepositoryPersistsAndRecoversCheckpoints(t *testing.T) {
 	db := integrationdb.Open(t)
 	integrationdb.Reset(t, db, nil)
-	owner := integrationdb.User(t, db, "slik-owner", integrationdb.Role(t, db, access.UserRoleSlug).ID, true)
+	owner := integrationdb.User(t, db, "slik-owner", true)
 	repository := NewRepository(db)
 	ctx := context.Background()
 	release, _, acquired, err := repository.AcquireLock(ctx)
@@ -101,5 +100,22 @@ func TestRepositoryPersistsAndRecoversCheckpoints(t *testing.T) {
 	completed, _ = repository.Get(ctx, job.ID, owner.ID, false)
 	if completed.OutputFile != "" || completed.InputFile != "" {
 		t.Fatalf("file references retained: %+v", completed)
+	}
+	other := integrationdb.User(t, db, "slik-other", true)
+	otherJob := Job{ID: "fedcba9876543210fedcba9876543210", OwnerID: other.ID, OwnerUsername: other.Username, ActorID: other.ID, ActorUsername: other.Username, OriginalFilename: "other.xlsx", AsOf: "2026-08-31", CreatedAt: time.Now().UTC(), InputFile: "other.input.xlsx"}
+	if err := repository.Create(ctx, otherJob, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := repository.Get(ctx, otherJob.ID, owner.ID, false); !errors.Is(err, ErrNotFound) {
+		t.Fatalf("ordinary user opened another owner's job: %v", err)
+	}
+	if visible, err := repository.Get(ctx, otherJob.ID, owner.ID, true); err != nil || visible.OwnerID != other.ID {
+		t.Fatalf("view-all access: job=%+v err=%v", visible, err)
+	}
+	if own, err := repository.History(ctx, owner.ID, false); err != nil || len(own) != 1 {
+		t.Fatalf("owner history=%v err=%v", own, err)
+	}
+	if all, err := repository.History(ctx, owner.ID, true); err != nil || len(all) != 2 {
+		t.Fatalf("view-all history=%v err=%v", all, err)
 	}
 }

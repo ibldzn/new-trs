@@ -33,11 +33,6 @@ func run(ctx context.Context, arguments []string, input *os.File, output, errorO
 			return usageError()
 		}
 		return app.Run(ctx)
-	case "admin":
-		if len(arguments) < 2 || arguments[1] != "create" {
-			return usageError()
-		}
-		return runAdminCreate(ctx, arguments[2:], input, output, errorOutput)
 	case "-h", "--help":
 		_, _ = fmt.Fprintln(output, usageText())
 		return nil
@@ -51,5 +46,5 @@ func usageError() error {
 }
 
 func usageText() string {
-	return "trs [serve|admin create [--username USER] [--name NAME]]"
+	return "trs [serve]"
 }

@@ -41,6 +41,13 @@ func TestParseAPIKey(t *testing.T) {
 	}
 }
 
+func TestParseBootstrapAccessManagers(t *testing.T) {
+	config, err := parse(mapLookup(baseValues("THOR_BOOTSTRAP_ACCESS_MANAGERS", " Alice,Bob ")))
+	if err != nil || config.BootstrapAccessManagers != "Alice,Bob" {
+		t.Fatalf("bootstrap managers=%q error=%v", config.BootstrapAccessManagers, err)
+	}
+}
+
 func TestParseExternalDatabaseDSNs(t *testing.T) {
 	config, err := parse(mapLookup(map[string]string{
 		"DB_NAME": "go_admin", "DB_USER": "root", "DWH_DBSTRING": " dwh ", "MSO_DBSTRING": " mso ",
@@ -69,7 +76,6 @@ func TestParseValidation(t *testing.T) {
 		{"invalid database port", baseValues("DB_PORT", "mysql"), "DB_PORT"},
 		{"invalid app url", baseValues("APP_URL", "localhost:8080"), "APP_URL"},
 		{"invalid app environment", baseValues("APP_ENV", "staging"), "APP_ENV"},
-		{"invalid registration flag", baseValues("ALLOW_REGISTRATION", "sometimes"), "ALLOW_REGISTRATION"},
 		{"invalid secure flag", baseValues("SESSION_SECURE", "sometimes"), "SESSION_SECURE"},
 		{"invalid session lifetime", baseValues("SESSION_LIFETIME", "0s"), "SESSION_LIFETIME"},
 		{"invalid remember lifetime", baseValues("SESSION_REMEMBER_LIFETIME", "later"), "SESSION_REMEMBER_LIFETIME"},

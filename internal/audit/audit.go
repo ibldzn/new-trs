@@ -13,6 +13,8 @@ import (
 type Action string
 
 const (
+	// Role, password, registration, and impersonation actions remain defined only
+	// so historical audit rows keep stable labels. Current runtime paths do not emit them.
 	ActionAuthLoginSuccess         Action = "auth.login.success"
 	ActionAuthLoginFailed          Action = "auth.login.failed"
 	ActionAuthLogin                       = ActionAuthLoginSuccess
@@ -25,6 +27,9 @@ const (
 	ActionUserRoleChanged          Action = "user.role_changed"
 	ActionUserActivated            Action = "user.activated"
 	ActionUserDeactivated          Action = "user.deactivated"
+	ActionUserAutoProvisioned      Action = "user.auto_provisioned"
+	ActionUserPermissionsUpdated   Action = "user.permissions_updated"
+	ActionAccessBootstrap          Action = "access.bootstrap"
 	ActionUserPasswordReset        Action = "user.password_reset"
 	ActionRoleCreated              Action = "role.created"
 	ActionRoleUpdated              Action = "role.updated"
@@ -238,6 +243,9 @@ func knownAction(action Action) bool {
 		ActionUserRoleChanged,
 		ActionUserActivated,
 		ActionUserDeactivated,
+		ActionUserAutoProvisioned,
+		ActionUserPermissionsUpdated,
+		ActionAccessBootstrap,
 		ActionUserPasswordReset,
 		ActionRoleCreated,
 		ActionRoleUpdated,

@@ -13,7 +13,6 @@ import (
 
 type RouterDependencies struct {
 	StaticFiles           fs.FS
-	AllowRegistration     bool
 	Authentication        *browserauth.HTTP
 	RegisterAPI           func(chi.Router)
 	RegisterAuthenticated func(chi.Router)
@@ -50,10 +49,6 @@ func NewRouter(dependencies RouterDependencies) http.Handler {
 			guest.Use(dependencies.Authentication.RequireGuest)
 			guest.Get("/login", dependencies.Authentication.LoginPage)
 			guest.Post("/login", dependencies.Authentication.Login)
-			if dependencies.AllowRegistration {
-				guest.Get("/register", dependencies.Authentication.RegisterPage)
-				guest.Post("/register", dependencies.Authentication.Register)
-			}
 		})
 		web.Post("/logout", dependencies.Authentication.Logout)
 

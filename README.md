@@ -4,8 +4,8 @@ Goment-based internal banking application for contractual loan positions, SLIK w
 
 ## Architecture
 
-- Local Goment users, Argon2id passwords, server-side sessions, RBAC, impersonation, and audit.
-- Central Fincloud system session. Browser sessions never contain Fincloud credentials or session IDs.
+- Fincloud-authenticated browser users, local per-user permissions, server-side THOR sessions, and audit.
+- Isolated temporary Fincloud login sessions plus a central system-account session for all business operations. Browser sessions never contain Fincloud credentials or session IDs.
 - Read-only MSO opening/historical evidence.
 - Read-only actual DWH H-1 evidence.
 - Application-owned H snapshot refreshed from Fincloud `Loan Outstanding Details Report Today`.
@@ -14,7 +14,7 @@ Goment-based internal banking application for contractual loan positions, SLIK w
 
 ## SLIK generator
 
-Run `make migrate` before deploying this version. Existing `reporting.generate` role assignments remain valid for `/slik`.
+Run `make migrate` before deploying this version. Existing `reporting.generate` access is migrated into per-user grants for `/slik`.
 
 Upload an `.xlsx` workbook containing `nomorekeningfasilitas`, `bakidebet`, and `sukubungaimbalan` in one header row on exactly one sheet. Supply reporting date separately. SLIK updates only target cell values, retains workbook structure, and fails without output on first account error. Duplicate account identifiers are processed once. Completed, failed, and canceled job files expire seven days after termination; metadata remains.
 
@@ -24,15 +24,16 @@ Upload an `.xlsx` workbook containing `nomorekeningfasilitas`, `bakidebet`, and 
 
 Requirements: Go 1.26.5+, Node.js 24+, npm, and MySQL 8+.
 
+The Fincloud-authentication migration is forward-only because dropped password hashes and exact role assignments cannot be reconstructed. Take a database backup before applying it.
+
 ```sh
 cp .env.example .env
 npm install
 make migrate
-make admin
 make dev
 ```
 
-Set application DB, read-only DWH/MSO DSNs, and Fincloud system credentials in `.env`. Never commit secrets.
+Set application DB, read-only DWH/MSO DSNs, Fincloud system credentials, and the initial `THOR_BOOTSTRAP_ACCESS_MANAGERS` usernames in `.env`. Bootstrap users still authenticate with Fincloud; after one active access manager exists, database grants are authoritative. Never commit secrets.
 
 `MSO_DBSTRING` is the only MSO runtime configuration. The application owns fixed legacy schema queries: debtor type uses `data_nasabah_badan.nasabah_master` and `debitur_golongan2`; interest type uses `data_kredit_master.kre_rekening` and `kre_sistem_bunga`.
 

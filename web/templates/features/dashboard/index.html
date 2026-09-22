@@ -10,10 +10,10 @@
         <article class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">
             <div class="flex items-center gap-3 text-slate-500 dark:text-slate-400">
                 <i data-lucide="user-round" class="size-5" aria-hidden="true"></i>
-                <h2 class="text-sm font-medium">Current role</h2>
+                <h2 class="text-sm font-medium">Authorization</h2>
             </div>
-            <p class="mt-4 text-xl font-semibold text-slate-950 dark:text-white">{{if .Principal.RoleName}}{{.Principal.RoleName}}{{else}}{{.Principal.RoleSlug}}{{end}}</p>
-            <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Role slug: {{.Principal.RoleSlug}}</p>
+            <p class="mt-4 text-xl font-semibold text-slate-950 dark:text-white">Per-user permissions</p>
+            <p class="mt-1 text-sm text-slate-500 dark:text-slate-400">Authorization is assigned to @{{.Principal.Username}}.</p>
         </article>
 
         <article class="rounded-2xl border border-slate-200 bg-white p-5 shadow-sm dark:border-slate-800 dark:bg-slate-900">

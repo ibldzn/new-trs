@@ -20,15 +20,14 @@ type SessionRepository struct {
 }
 
 type sessionRow struct {
-	ID                 uint64        `db:"id"`
-	UserID             uint64        `db:"user_id"`
-	ImpersonatedUserID sql.NullInt64 `db:"impersonated_user_id"`
-	TokenHash          []byte        `db:"token_hash"`
-	RememberMe         bool          `db:"remember_me"`
-	ExpiresAt          time.Time     `db:"expires_at"`
-	LastSeenAt         time.Time     `db:"last_seen_at"`
-	CreatedAt          time.Time     `db:"created_at"`
-	UpdatedAt          time.Time     `db:"updated_at"`
+	ID         uint64    `db:"id"`
+	UserID     uint64    `db:"user_id"`
+	TokenHash  []byte    `db:"token_hash"`
+	RememberMe bool      `db:"remember_me"`
+	ExpiresAt  time.Time `db:"expires_at"`
+	LastSeenAt time.Time `db:"last_seen_at"`
+	CreatedAt  time.Time `db:"created_at"`
+	UpdatedAt  time.Time `db:"updated_at"`
 }
 
 func NewSessionRepository(database *sqlx.DB) *SessionRepository {
@@ -128,21 +127,20 @@ func (row sessionRow) session() (Session, error) {
 	var tokenHash [32]byte
 	copy(tokenHash[:], row.TokenHash)
 	return Session{
-		ID:                 row.ID,
-		UserID:             row.UserID,
-		ImpersonatedUserID: nullableUserID(row.ImpersonatedUserID),
-		TokenHash:          tokenHash,
-		RememberMe:         row.RememberMe,
-		ExpiresAt:          row.ExpiresAt,
-		LastSeenAt:         row.LastSeenAt,
-		CreatedAt:          row.CreatedAt,
-		UpdatedAt:          row.UpdatedAt,
+		ID:         row.ID,
+		UserID:     row.UserID,
+		TokenHash:  tokenHash,
+		RememberMe: row.RememberMe,
+		ExpiresAt:  row.ExpiresAt,
+		LastSeenAt: row.LastSeenAt,
+		CreatedAt:  row.CreatedAt,
+		UpdatedAt:  row.UpdatedAt,
 	}, nil
 }
 
 func FindValidSession(ctx context.Context, database sqlx.ExtContext, tokenHash [32]byte, now time.Time, lock bool) (Session, error) {
 	query := `
-		SELECT id, user_id, impersonated_user_id, token_hash, remember_me, expires_at, last_seen_at, created_at, updated_at
+		SELECT id, user_id, token_hash, remember_me, expires_at, last_seen_at, created_at, updated_at
 		FROM sessions
 		WHERE token_hash = ? AND expires_at > ?`
 	if lock {
@@ -156,12 +154,4 @@ func FindValidSession(ctx context.Context, database sqlx.ExtContext, tokenHash [
 		return Session{}, fmt.Errorf("find valid session: %w", err)
 	}
 	return row.session()
-}
-
-func nullableUserID(value sql.NullInt64) *uint64 {
-	if !value.Valid {
-		return nil
-	}
-	id := uint64(value.Int64)
-	return &id
 }

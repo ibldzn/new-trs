@@ -94,6 +94,13 @@ func Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("initialize Fincloud: %w", err)
 	}
+	fincloudAuthenticator, err := fincloud.NewAuthenticator(fincloud.AuthenticatorConfig{
+		BaseURL: applicationConfig.Fincloud.BaseURL, CAFile: applicationConfig.Fincloud.CAFile,
+		InsecureTLS: applicationConfig.Fincloud.InsecureTLS, Timeout: applicationConfig.Fincloud.Timeout, Logger: logger,
+	})
+	if err != nil {
+		return fmt.Errorf("initialize Fincloud browser authenticator: %w", err)
+	}
 	defer func() {
 		closeContext, closeCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		if err := fincloudClient.Close(closeContext); err != nil {
@@ -103,7 +110,7 @@ func Run(ctx context.Context) error {
 	}()
 
 	bootstrapContext, cancel := context.WithTimeout(ctx, 10*time.Second)
-	err = access.Bootstrap(bootstrapContext, databaseConnection, PermissionDefinitions(), time.Now().UTC())
+	err = access.Bootstrap(bootstrapContext, databaseConnection, PermissionDefinitions(), applicationConfig.BootstrapAccessManagers, time.Now().UTC())
 	cancel()
 	if err != nil {
 		return fmt.Errorf("initialize access control: %w", err)
@@ -114,6 +121,7 @@ func Run(ctx context.Context) error {
 	accessRepository := access.NewRepository(databaseConnection)
 	sessionRepository := auth.NewSessionRepository(databaseConnection)
 	authenticationService, err := browserauth.NewService(
+		fincloudAuthenticator,
 		userRepository,
 		accessRepository,
 		sessionRepository,
@@ -185,7 +193,6 @@ func Run(ctx context.Context) error {
 		renderer,
 		cookieManager,
 		applicationConfig.App.Name,
-		applicationConfig.App.AllowRegistration,
 		logger,
 		appendAudit,
 		errorResponder,
@@ -200,14 +207,12 @@ func Run(ctx context.Context) error {
 		registerAPI = api.NewHandler(positionService, location, applicationConfig.APIKey, appendAudit, logger).RegisterRoutes
 	}
 	handler := server.NewRouter(server.RouterDependencies{
-		StaticFiles:       staticFiles,
-		AllowRegistration: applicationConfig.App.AllowRegistration,
-		Authentication:    authenticationHTTP,
-		RegisterAPI:       registerAPI,
+		StaticFiles:    staticFiles,
+		Authentication: authenticationHTTP,
+		RegisterAPI:    registerAPI,
 		RegisterAuthenticated: func(router chi.Router) {
 			registerFeatureRoutes(router, featureDependencies{
-				database: databaseConnection, users: userRepository, access: accessRepository,
-				admin: adminHTTP, cookies: cookieManager,
+				database: databaseConnection, admin: adminHTTP,
 				positions: positionService, snapshot: snapshotService, slik: slikManager, lps: lpsGenerator,
 				location: location, maxSLIKUpload: applicationConfig.SLIK.MaxUploadBytes,
 				lpsDefaultCode: applicationConfig.LPS.DefaultParticipantCode, appendAudit: appendAudit, logger: logger,

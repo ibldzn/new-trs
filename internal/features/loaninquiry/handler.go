@@ -117,10 +117,9 @@ func (handler *Handler) resolveResult(ctx context.Context, account string, asOf 
 func (handler *Handler) auditInquiry(ctx context.Context, resolved loan.ResolvedPosition, asOf loan.Date) {
 	principal, ok := browserauth.CurrentPrincipal(ctx)
 	if ok && handler.appendAudit != nil {
-		actor := audit.Identity{UserID: principal.Actor.UserID, Username: principal.Actor.Username}
-		effective := audit.Identity{UserID: principal.UserID, Username: principal.Username}
+		identity := audit.Identity{UserID: principal.UserID, Username: principal.Username}
 		event := audit.Event{
-			Attribution: audit.Attribution{Actor: &actor, Effective: &effective}, Action: audit.ActionLoanInquiry,
+			Attribution: audit.Attribution{Actor: &identity, Effective: &identity}, Action: audit.ActionLoanInquiry,
 			Metadata: audit.LoanInquiryMetadata{AccountNumber: resolved.Position.AccountNumber, AsOf: asOf.String(), Source: string(resolved.Position.Source)}, CreatedAt: time.Now().UTC(),
 		}
 		if err := handler.appendAudit(ctx, event); err != nil && handler.logger != nil {

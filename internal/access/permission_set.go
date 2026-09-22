@@ -16,7 +16,3 @@ func (set PermissionSet) Has(key string) bool {
 	_, ok := set.keys[key]
 	return ok
 }
-
-func IsAdminRole(slug string) bool {
-	return slug == AdminRoleSlug
-}

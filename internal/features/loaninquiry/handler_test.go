@@ -19,11 +19,11 @@ import (
 	"github.com/ibldzn/trs/internal/audit"
 	"github.com/ibldzn/trs/internal/auth"
 	"github.com/ibldzn/trs/internal/browserauth"
+	"github.com/ibldzn/trs/internal/fincloud"
 	"github.com/ibldzn/trs/internal/loan"
 	"github.com/ibldzn/trs/internal/platform/adminshell"
 	"github.com/ibldzn/trs/internal/platform/navigation"
 	"github.com/ibldzn/trs/internal/render"
-	"github.com/ibldzn/trs/internal/user"
 	webfiles "github.com/ibldzn/trs/web"
 )
 
@@ -45,8 +45,8 @@ type fakeAuthentication struct{ principal browserauth.Principal }
 func (*fakeAuthentication) Login(context.Context, browserauth.LoginInput, time.Time) (browserauth.LoginResult, error) {
 	return browserauth.LoginResult{}, browserauth.ErrInvalidCredentials
 }
-func (*fakeAuthentication) Register(context.Context, browserauth.RegisterInput, time.Time) (user.User, error) {
-	return user.User{}, nil
+func (*fakeAuthentication) Labels(context.Context) (fincloud.AuthLabels, error) {
+	return fincloud.AuthLabels{}, nil
 }
 func (service *fakeAuthentication) ResolveSession(context.Context, [32]byte, time.Time) (browserauth.Principal, error) {
 	return service.principal, nil
@@ -324,8 +324,7 @@ func syntheticResolved(t *testing.T, rowCount int) (loan.ResolvedPosition, loan.
 
 func permittedPrincipal() browserauth.Principal {
 	return browserauth.Principal{
-		UserID: 1, Username: "viewer", RoleSlug: access.UserRoleSlug,
-		Actor:       browserauth.Identity{UserID: 1, Username: "viewer", RoleSlug: access.UserRoleSlug},
+		UserID: 1, Username: "viewer",
 		Permissions: access.NewPermissionSet([]string{PermissionInquiry}),
 	}
 }
@@ -343,7 +342,7 @@ func loanInquiryRouter(t *testing.T, principal browserauth.Principal, positions 
 		t.Fatal(err)
 	}
 	cookies := browserauth.NewCookieManager("session", false, time.Hour)
-	authentication := browserauth.NewHTTP(&fakeAuthentication{principal}, renderer, cookies, "Test", false, logger, func(context.Context, audit.Event) error { return nil }, errors)
+	authentication := browserauth.NewHTTP(&fakeAuthentication{principal}, renderer, cookies, "Test", logger, func(context.Context, audit.Event) error { return nil }, errors)
 	router := chi.NewRouter()
 	router.Use(authentication.LoadPrincipal)
 	NewHandler(adminshell.New(renderer, registry, "Test", errors), positions, time.FixedZone("Jakarta", 7*60*60), appendAudit, logger).RegisterRoutes(router)

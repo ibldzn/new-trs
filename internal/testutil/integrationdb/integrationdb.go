@@ -60,6 +60,13 @@ func Open(t *testing.T) *sqlx.DB {
 
 func Reset(t *testing.T, db *sqlx.DB, definitions []access.PermissionDefinition) {
 	t.Helper()
+	hasManage := false
+	for _, definition := range definitions {
+		hasManage = hasManage || definition.Key == access.PermissionManage
+	}
+	if !hasManage {
+		definitions = append(definitions, access.PermissionDefinition{Key: access.PermissionManage, Name: "Manage Access", Group: "Access", Description: "Manage test access."})
+	}
 	connection, err := db.Connx(context.Background())
 	if err != nil {
 		t.Fatal(err)
@@ -69,7 +76,7 @@ func Reset(t *testing.T, db *sqlx.DB, definitions []access.PermissionDefinition)
 		t.Fatal(err)
 	}
 	defer connection.ExecContext(context.Background(), `SET FOREIGN_KEY_CHECKS = 1`)
-	for _, table := range []string{"slik_job_accounts", "slik_jobs", "audit_logs", "sessions", "role_permissions", "users", "permissions", "roles"} {
+	for _, table := range []string{"slik_job_accounts", "slik_jobs", "audit_logs", "sessions", "user_permissions", "users", "permissions"} {
 		if _, err := connection.ExecContext(context.Background(), `TRUNCATE TABLE `+table); err != nil {
 			t.Fatalf("truncate integration table %s: %v", table, err)
 		}
@@ -77,7 +84,10 @@ func Reset(t *testing.T, db *sqlx.DB, definitions []access.PermissionDefinition)
 	if _, err := connection.ExecContext(context.Background(), `SET FOREIGN_KEY_CHECKS = 1`); err != nil {
 		t.Fatal(err)
 	}
-	if err := access.Bootstrap(context.Background(), db, definitions, Now()); err != nil {
+	if err := access.Bootstrap(context.Background(), db, definitions, "integration-manager", Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.ExecContext(context.Background(), `DELETE FROM audit_logs`); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -86,33 +96,10 @@ func Now() time.Time {
 	return time.Date(2026, 8, 9, 12, 0, 0, 123456000, time.UTC)
 }
 
-func Role(t *testing.T, db *sqlx.DB, slug string) access.Role {
-	t.Helper()
-	role, err := access.NewRepository(db).FindRoleBySlug(context.Background(), slug)
-	if err != nil {
-		t.Fatal(err)
-	}
-	return role
-}
-
-func CustomRole(t *testing.T, db *sqlx.DB, name, slug string) access.Role {
-	t.Helper()
-	now := Now()
-	result, err := db.Exec(`INSERT INTO roles (name, slug, is_system, created_at, updated_at) VALUES (?, ?, FALSE, ?, ?)`, name, slug, now, now)
-	if err != nil {
-		t.Fatal(err)
-	}
-	id, err := result.LastInsertId()
-	if err != nil {
-		t.Fatal(err)
-	}
-	return access.Role{ID: uint64(id), Name: name, Slug: slug, CreatedAt: now, UpdatedAt: now}
-}
-
-func User(t *testing.T, db *sqlx.DB, username string, roleID uint64, active bool) user.User {
+func User(t *testing.T, db *sqlx.DB, username string, active bool) user.User {
 	t.Helper()
 	found, err := user.NewRepository(db).Create(context.Background(), user.CreateParams{
-		Username: username, Name: username, PasswordHash: "integration-hash", RoleID: roleID, IsActive: active,
+		Username: username, Name: username, IsActive: active,
 	}, Now())
 	if err != nil {
 		t.Fatal(err)
@@ -120,9 +107,8 @@ func User(t *testing.T, db *sqlx.DB, username string, roleID uint64, active bool
 	return found
 }
 
-func Requester(found user.User, role access.Role) securityctx.Requester {
-	identity := securityctx.Identity{UserID: found.ID, Username: found.Username}
-	return securityctx.Requester{Actor: identity, Effective: identity, EffectiveRoleID: role.ID, EffectiveRoleSlug: role.Slug}
+func Requester(found user.User, permissions ...string) securityctx.Requester {
+	return securityctx.Requester{UserID: found.ID, Username: found.Username, Permissions: access.NewPermissionSet(permissions)}
 }
 
 func Session(t *testing.T, repository *auth.SessionRepository, userID uint64, remember bool, token string, now time.Time) auth.Session {

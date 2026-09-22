@@ -188,21 +188,21 @@ func (manager *Manager) Submit(ctx context.Context, attribution audit.Attributio
 	return job, nil
 }
 
-func (manager *Manager) Get(ctx context.Context, id string, owner uint64, admin bool) (Job, error) {
+func (manager *Manager) Get(ctx context.Context, id string, owner uint64, viewAll bool) (Job, error) {
 	readContext, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	return manager.store.Get(readContext, id, owner, admin)
+	return manager.store.Get(readContext, id, owner, viewAll)
 }
-func (manager *Manager) History(ctx context.Context, owner uint64, admin bool) ([]Job, error) {
+func (manager *Manager) History(ctx context.Context, owner uint64, viewAll bool) ([]Job, error) {
 	readContext, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	return manager.store.History(readContext, owner, admin)
+	return manager.store.History(readContext, owner, viewAll)
 }
 
-func (manager *Manager) Cancel(ctx context.Context, id string, owner uint64, admin bool) error {
+func (manager *Manager) Cancel(ctx context.Context, id string, owner uint64, viewAll bool) error {
 	writeContext, stop := context.WithTimeout(ctx, 5*time.Second)
 	defer stop()
-	if err := manager.store.Cancel(writeContext, id, owner, admin); err != nil {
+	if err := manager.store.Cancel(writeContext, id, owner, viewAll); err != nil {
 		return err
 	}
 	manager.mu.Lock()
@@ -213,10 +213,10 @@ func (manager *Manager) Cancel(ctx context.Context, id string, owner uint64, adm
 	return nil
 }
 
-func (manager *Manager) OpenOutput(ctx context.Context, id string, owner uint64, admin bool) (*os.File, Job, error) {
+func (manager *Manager) OpenOutput(ctx context.Context, id string, owner uint64, viewAll bool) (*os.File, Job, error) {
 	readContext, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
-	job, err := manager.store.Get(readContext, id, owner, admin)
+	job, err := manager.store.Get(readContext, id, owner, viewAll)
 	if err != nil {
 		return nil, Job{}, err
 	}

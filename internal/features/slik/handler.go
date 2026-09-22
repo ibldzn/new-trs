@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/ibldzn/trs/internal/access"
 	"github.com/ibldzn/trs/internal/audit"
 	"github.com/ibldzn/trs/internal/browserauth"
 	"github.com/ibldzn/trs/internal/loan"
@@ -34,7 +33,7 @@ func NewHandler(admin *adminshell.Shell, jobs *core.Manager, location *time.Loca
 
 func (handler *Handler) Index(writer http.ResponseWriter, request *http.Request) {
 	principal, _ := browserauth.CurrentPrincipal(request.Context())
-	jobs, err := handler.jobs.History(request.Context(), principal.UserID, access.IsAdminRole(principal.RoleSlug))
+	jobs, err := handler.jobs.History(request.Context(), principal.UserID, principal.Can(PermissionViewAll))
 	if err != nil {
 		handler.admin.Internal(writer, request, "list SLIK jobs", err)
 		return
@@ -65,9 +64,8 @@ func (handler *Handler) Submit(writer http.ResponseWriter, request *http.Request
 		handler.admin.Internal(writer, request, "submit SLIK job", errors.New("principal missing"))
 		return
 	}
-	actor := audit.Identity{UserID: principal.Actor.UserID, Username: principal.Actor.Username}
-	effective := audit.Identity{UserID: principal.UserID, Username: principal.Username}
-	job, err := handler.jobs.Submit(request.Context(), audit.Attribution{Actor: &actor, Effective: &effective}, header.Filename, asOf, file)
+	identity := audit.Identity{UserID: principal.UserID, Username: principal.Username}
+	job, err := handler.jobs.Submit(request.Context(), audit.Attribution{Actor: &identity, Effective: &identity}, header.Filename, asOf, file)
 	if err != nil {
 		var validation core.ValidationError
 		if errors.As(err, &validation) {
@@ -105,7 +103,7 @@ func (handler *Handler) StatusPartial(writer http.ResponseWriter, request *http.
 
 func (handler *Handler) Download(writer http.ResponseWriter, request *http.Request) {
 	principal, _ := browserauth.CurrentPrincipal(request.Context())
-	file, job, err := handler.jobs.OpenOutput(request.Context(), chi.URLParam(request, "id"), principal.UserID, access.IsAdminRole(principal.RoleSlug))
+	file, job, err := handler.jobs.OpenOutput(request.Context(), chi.URLParam(request, "id"), principal.UserID, principal.Can(PermissionViewAll))
 	if errors.Is(err, core.ErrNotFound) {
 		handler.admin.NotFound(writer, request)
 		return
@@ -130,7 +128,7 @@ func (handler *Handler) Download(writer http.ResponseWriter, request *http.Reque
 
 func (handler *Handler) Cancel(writer http.ResponseWriter, request *http.Request) {
 	principal, _ := browserauth.CurrentPrincipal(request.Context())
-	err := handler.jobs.Cancel(request.Context(), chi.URLParam(request, "id"), principal.UserID, access.IsAdminRole(principal.RoleSlug))
+	err := handler.jobs.Cancel(request.Context(), chi.URLParam(request, "id"), principal.UserID, principal.Can(PermissionViewAll))
 	if errors.Is(err, core.ErrNotFound) {
 		handler.admin.NotFound(writer, request)
 		return
@@ -144,7 +142,7 @@ func (handler *Handler) Cancel(writer http.ResponseWriter, request *http.Request
 
 func (handler *Handler) job(writer http.ResponseWriter, request *http.Request) (core.Job, bool) {
 	principal, _ := browserauth.CurrentPrincipal(request.Context())
-	job, err := handler.jobs.Get(request.Context(), chi.URLParam(request, "id"), principal.UserID, access.IsAdminRole(principal.RoleSlug))
+	job, err := handler.jobs.Get(request.Context(), chi.URLParam(request, "id"), principal.UserID, principal.Can(PermissionViewAll))
 	if errors.Is(err, core.ErrNotFound) {
 		handler.admin.NotFound(writer, request)
 		return core.Job{}, false
@@ -158,6 +156,6 @@ func (handler *Handler) job(writer http.ResponseWriter, request *http.Request) (
 
 func (handler *Handler) inputError(writer http.ResponseWriter, request *http.Request, status int, message string) {
 	principal, _ := browserauth.CurrentPrincipal(request.Context())
-	jobs, _ := handler.jobs.History(request.Context(), principal.UserID, access.IsAdminRole(principal.RoleSlug))
+	jobs, _ := handler.jobs.History(request.Context(), principal.UserID, principal.Can(PermissionViewAll))
 	handler.admin.RenderPage(writer, request, status, "features/slik/index", "SLIK Generator", IndexData{AsOf: request.PostFormValue("as_of"), Error: message, Jobs: jobs})
 }
