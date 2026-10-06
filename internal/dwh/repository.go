@@ -44,7 +44,7 @@ type collectabilityRow struct {
 func (repository *Repository) ExactPosition(ctx context.Context, account string, asOf loan.Date) (loan.LoanPosition, error) {
 	const query = `
 		SELECT as_of_date, no_rekening, periode_mulai, sisa_pokok_pinjaman, kolektibilitas_bi, tunggakan_pokok, tunggakan_bunga, denda_tunggakan
-		FROM dwhv2.fincloud_eod_detail_outstanding_rekening_pinjaman
+		FROM fincloud_eod_detail_outstanding_rekening_pinjaman
 		WHERE no_rekening = ? AND as_of_date = ?
 		LIMIT 1`
 	var row positionRow
@@ -75,7 +75,7 @@ func (repository *Repository) CollectabilityTimeline(ctx context.Context, accoun
 	}
 	const query = `
 		SELECT as_of_date, kolektibilitas_bi
-		FROM dwhv2.fincloud_eod_detail_outstanding_rekening_pinjaman
+		FROM fincloud_eod_detail_outstanding_rekening_pinjaman
 		WHERE no_rekening = ?
 		  AND as_of_date >= ?
 		  AND as_of_date <= ?
