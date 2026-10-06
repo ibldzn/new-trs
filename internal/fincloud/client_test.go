@@ -275,3 +275,26 @@ func TestReportDownloadIsBounded(t *testing.T) {
 		t.Fatalf("error = %v", err)
 	}
 }
+
+func TestReportDownloadsStripUTF8BOM(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/admin/access/login" {
+			_, _ = io.WriteString(writer, `{"status":"ok","data":{"result":{"sessionid":"session"}}}`)
+			return
+		}
+		_, _ = io.WriteString(writer, "\xef\xbb\xbfcif_no|acc_no\n")
+	}))
+	defer server.Close()
+	client, err := NewClient(Config{BaseURL: server.URL, Username: "u", Password: "p", LocationID: "l", RoleID: "r", HTTPClient: server.Client(), MaxReportSize: 1024})
+	if err != nil {
+		t.Fatal(err)
+	}
+	maintenance, err := client.DownloadMaintenanceReport(context.Background(), "cbrsavings.csv", "/app/report/cbr/20260914")
+	if err != nil || string(maintenance) != "cif_no|acc_no\n" {
+		t.Fatalf("maintenance = %q, %v", maintenance, err)
+	}
+	named, err := client.DownloadNamedReport(context.Background(), "report")
+	if err != nil || string(named) != "cif_no|acc_no\n" {
+		t.Fatalf("named = %q, %v", named, err)
+	}
+}

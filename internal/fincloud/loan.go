@@ -1,6 +1,7 @@
 package fincloud
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -388,10 +389,10 @@ func (client *Client) GetCIF(ctx context.Context, cif string) (CIFData, error) {
 }
 
 func (client *Client) DownloadMaintenanceReport(ctx context.Context, file, path string) ([]byte, error) {
-	return client.do(ctx, client.maxReportSize, func(ctx context.Context, session string) (*http.Request, error) {
+	return stripBOM(client.do(ctx, client.maxReportSize, func(ctx context.Context, session string) (*http.Request, error) {
 		query := url.Values{"file": {file}, "path": {path}, "sessionId": {session}}
 		return client.newRequest(ctx, http.MethodGet, "/system/downloaderlaporan/download.php", query, nil)
-	})
+	}))
 }
 
 func (client *Client) DownloadNamedReport(ctx context.Context, name string, params ...string) ([]byte, error) {
@@ -399,8 +400,13 @@ func (client *Client) DownloadNamedReport(ctx context.Context, name string, para
 	if err != nil {
 		return nil, fmt.Errorf("encode report parameters: %w", err)
 	}
-	return client.do(ctx, client.maxReportSize, func(ctx context.Context, session string) (*http.Request, error) {
+	return stripBOM(client.do(ctx, client.maxReportSize, func(ctx context.Context, session string) (*http.Request, error) {
 		query := url.Values{"nm": {name}, "type": {"csv"}, "p": {string(encoded)}}
 		return client.newRequest(ctx, http.MethodGet, "/system/laporanUmum/data/lap", query, nil)
-	})
+	}))
+}
+
+// stripBOM drops the UTF-8 BOM Fincloud may prepend to CSV reports, which would otherwise corrupt the first header name.
+func stripBOM(body []byte, err error) ([]byte, error) {
+	return bytes.TrimPrefix(body, []byte("\xef\xbb\xbf")), err
 }
