@@ -37,6 +37,15 @@ type PageData struct {
 	Error string
 }
 
+// DateInputValue renders the YYYYMMDD reporting date in the YYYY-MM-DD form <input type="date"> expects.
+func (data PageData) DateInputValue() string {
+	date, err := time.Parse("20060102", data.Input.ReportingDate)
+	if err != nil {
+		return ""
+	}
+	return date.Format(time.DateOnly)
+}
+
 func NewHandler(admin *adminshell.Shell, generator generator, defaultCode string, location *time.Location, appendAudit func(context.Context, audit.Event) error, logger *slog.Logger) *Handler {
 	return &Handler{admin: admin, generator: generator, defaultCode: defaultCode, location: location, appendAudit: appendAudit, logger: logger}
 }
@@ -52,7 +61,7 @@ func (handler *Handler) Generate(writer http.ResponseWriter, request *http.Reque
 		return
 	}
 	input := corelps.Input{
-		ParticipantCode: strings.TrimSpace(request.PostFormValue("participant_code")), ReportingDate: strings.TrimSpace(request.PostFormValue("reporting_date")),
+		ParticipantCode: strings.TrimSpace(request.PostFormValue("participant_code")), ReportingDate: strings.ReplaceAll(strings.TrimSpace(request.PostFormValue("reporting_date")), "-", ""),
 		Period: strings.TrimSpace(request.PostFormValue("period")), Version: strings.TrimSpace(request.PostFormValue("version")),
 	}
 	file, err := os.CreateTemp("", "trs-lps-*.zip")
