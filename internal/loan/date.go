@@ -57,3 +57,12 @@ func (date Date) key() int { return date.year*10000 + int(date.month)*100 + date
 func (date Date) AddDays(days int, location *time.Location) Date {
 	return NewDate(date.Time(location).AddDate(0, 0, days), location)
 }
+
+// DefaultReportingDate is today when today is the last day of its month, otherwise the previous month end.
+func DefaultReportingDate(now time.Time, location *time.Location) Date {
+	today := NewDate(now, location)
+	if tomorrow := today.AddDays(1, location); tomorrow.month != today.month {
+		return today
+	}
+	return Date{year: today.year, month: today.month, day: 1}.AddDays(-1, location)
+}

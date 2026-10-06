@@ -51,7 +51,7 @@ func NewHandler(admin *adminshell.Shell, generator generator, defaultCode string
 }
 
 func (handler *Handler) Index(writer http.ResponseWriter, request *http.Request) {
-	handler.admin.RenderPage(writer, request, http.StatusOK, "features/lps/index", "LPS Generation", PageData{Input: corelps.Input{ParticipantCode: handler.defaultCode, ReportingDate: time.Now().In(handler.location).Format("20060102")}})
+	handler.admin.RenderPage(writer, request, http.StatusOK, "features/lps/index", "LPS Generation", PageData{Input: corelps.Input{ParticipantCode: handler.defaultCode, ReportingDate: loan.DefaultReportingDate(time.Now(), handler.location).Time(handler.location).Format("20060102")}})
 }
 
 func (handler *Handler) Generate(writer http.ResponseWriter, request *http.Request) {

@@ -38,7 +38,7 @@ func (handler *Handler) Index(writer http.ResponseWriter, request *http.Request)
 		handler.admin.Internal(writer, request, "list SLIK jobs", err)
 		return
 	}
-	handler.admin.RenderPage(writer, request, http.StatusOK, "features/slik/index", "SLIK Generator", IndexData{AsOf: loan.NewDate(time.Now(), handler.location).String(), Jobs: jobs})
+	handler.admin.RenderPage(writer, request, http.StatusOK, "features/slik/index", "SLIK Generator", IndexData{AsOf: loan.DefaultReportingDate(time.Now(), handler.location).String(), Jobs: jobs})
 }
 
 func (handler *Handler) Submit(writer http.ResponseWriter, request *http.Request) {
