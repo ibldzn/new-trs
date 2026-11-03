@@ -166,6 +166,19 @@ func TestResultViewOmitsDisbursementRowWithoutAuthoritativeStart(t *testing.T) {
 	}
 }
 
+func TestResultViewFallsBackToFincloudInstallmentZeroForDisbursementRow(t *testing.T) {
+	resolved, asOf := syntheticResolved(t, 3)
+	resolved.Position.LoanStartDate = loan.Date{}
+	resolved.Loan.ContractScheduleEvidence = []loan.ContractualInstallmentEvidence{{Number: 1, RawDueDate: "2025-02-07"}, {Number: 0, RawDueDate: "2025-01-07 00:00:00"}}
+	view, err := newResultView(resolved, resolved.Loan.PrimaryAccount, asOf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(view.ScheduleRows) != 4 || view.ScheduleRows[0].Status != "DISBURSED" || view.ScheduleRows[0].Date != "07 Jan 2025" || !strings.HasPrefix(view.LoanPeriod, "07 Jan 2025 | 3 bln | ") {
+		t.Fatalf("unexpected presentation: period=%q rows=%+v", view.LoanPeriod, view.ScheduleRows)
+	}
+}
+
 func TestCurrencyFormattingKeepsExactMoneyAndAddsGrouping(t *testing.T) {
 	for _, test := range []struct {
 		value string

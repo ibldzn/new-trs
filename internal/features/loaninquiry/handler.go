@@ -150,9 +150,10 @@ func newResultView(resolved loan.ResolvedPosition, requestedAccount string, asOf
 	}
 	early := principalPerPeriod.Add(interestPerPeriod).Mul(loan.MoneyFromInt(6))
 	schedule := make([]ScheduleRowView, 0, len(resolved.ContractualSchedule)+1)
-	if !resolved.Position.LoanStartDate.IsZero() {
+	startDate := loanStartDate(resolved)
+	if !startDate.IsZero() {
 		schedule = append(schedule, ScheduleRowView{
-			Number: 0, Date: formatDate(resolved.Position.LoanStartDate), Installment: formatCurrency(loan.Money{}),
+			Number: 0, Date: formatDate(startDate), Installment: formatCurrency(loan.Money{}),
 			Principal: formatCurrency(loan.Money{}), Interest: formatCurrency(loan.Money{}),
 			Outstanding: formatCurrency(resolved.Loan.PlafondLimit), Status: "DISBURSED",
 		})
@@ -182,8 +183,8 @@ func newResultView(resolved loan.ResolvedPosition, requestedAccount string, asOf
 		installmentSummary = fmt.Sprintf("%d dari %d", current, len(dueDates))
 	}
 	loanPeriod := "-"
-	if !resolved.Position.LoanStartDate.IsZero() && len(dueDates) > 0 && resolved.Loan.TenorMonths > 0 {
-		loanPeriod = fmt.Sprintf("%s | %d bln | %s", formatDate(resolved.Position.LoanStartDate), resolved.Loan.TenorMonths, formatDate(dueDates[len(dueDates)-1]))
+	if !startDate.IsZero() && len(dueDates) > 0 && resolved.Loan.TenorMonths > 0 {
+		loanPeriod = fmt.Sprintf("%s | %d bln | %s", formatDate(startDate), resolved.Loan.TenorMonths, formatDate(dueDates[len(dueDates)-1]))
 	}
 	query := url.Values{"account": {requestedAccount}, "as_of": {asOf.String()}}
 	return ResultView{
@@ -200,6 +201,27 @@ func newResultView(resolved loan.ResolvedPosition, requestedAccount string, asOf
 		IsReconstructed: resolved.Position.Source == loan.SourceReconstructed,
 		PrintURL:        "/loans/inquiry/pdf?" + query.Encode(), ScheduleRows: schedule,
 	}, nil
+}
+
+// loanStartDate falls back to Fincloud's installment 0 (disbursement) row when the position
+// source carries no start date, e.g. closed or MSO positions.
+func loanStartDate(resolved loan.ResolvedPosition) loan.Date {
+	if !resolved.Position.LoanStartDate.IsZero() {
+		return resolved.Position.LoanStartDate
+	}
+	for _, row := range resolved.Loan.ContractScheduleEvidence {
+		if row.Number != 0 {
+			continue
+		}
+		raw := strings.TrimSpace(row.RawDueDate)
+		if len(raw) >= len(loan.DateLayout) {
+			raw = raw[:len(loan.DateLayout)]
+		}
+		if date, err := loan.ParseDate(raw, time.UTC); err == nil {
+			return date
+		}
+	}
+	return loan.Date{}
 }
 
 func contractualDueDates(resolved loan.ResolvedPosition) []loan.Date {
