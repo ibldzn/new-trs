@@ -35,6 +35,7 @@ type SnapshotRepository interface {
 
 type Calculator interface {
 	Calculate(loan.CalculationInput) (loan.CalculationResult, error)
+	BuildSchedule(loan.Money, int, loan.Money, []loan.ContractualInstallment) ([]loan.ContractualScheduleRow, error)
 }
 
 type Service struct {
@@ -60,6 +61,31 @@ func NewService(fincloud FincloudGateway, mso MSORepository, dwh DWHRepository, 
 }
 
 func (service *Service) GetLoanPosition(ctx context.Context, account string, asOf loan.Date) (loan.ResolvedPosition, error) {
+	resolved, err := service.resolvePosition(ctx, account, asOf)
+	if err == nil && resolved.Position.Source != loan.SourceReconstructed {
+		resolved.ContractualSchedule = service.displaySchedule(resolved.Loan)
+	}
+	return resolved, err
+}
+
+// displaySchedule builds the flat contractual schedule from Fincloud's jadwalangsuran for
+// non-reconstructed sources. It is display-only, so an unusable schedule yields none instead of failing the inquiry.
+func (service *Service) displaySchedule(contract loan.ContractData) []loan.ContractualScheduleRow {
+	if len(contract.ContractScheduleEvidence) == 0 {
+		return nil
+	}
+	installments, err := normalizeContractSchedule(contract.ContractScheduleEvidence, contract.TenorMonths, service.location)
+	if err != nil {
+		return nil
+	}
+	rows, err := service.calculator.BuildSchedule(contract.PlafondLimit, contract.TenorMonths, contract.FlatRatePercent, installments)
+	if err != nil {
+		return nil
+	}
+	return rows
+}
+
+func (service *Service) resolvePosition(ctx context.Context, account string, asOf loan.Date) (loan.ResolvedPosition, error) {
 	account = strings.TrimSpace(account)
 	if account == "" || asOf.IsZero() {
 		return loan.ResolvedPosition{}, fmt.Errorf("%w: account and as-of date are required", loan.ErrInvalidInput)

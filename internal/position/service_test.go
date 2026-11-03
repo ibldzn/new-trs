@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/ibldzn/trs/internal/contractual"
 	"github.com/ibldzn/trs/internal/fincloud"
 	"github.com/ibldzn/trs/internal/loan"
 )
@@ -227,6 +228,10 @@ func (fake *calculatorFake) Calculate(input loan.CalculationInput) (loan.Calcula
 	fake.calls++
 	fake.input = input
 	return fake.result, nil
+}
+
+func (fake *calculatorFake) BuildSchedule(principal loan.Money, tenor int, flatRate loan.Money, source []loan.ContractualInstallment) ([]loan.ContractualScheduleRow, error) {
+	return contractual.Calculator{}.BuildSchedule(principal, tenor, flatRate, source)
 }
 
 func TestPositionServiceSelectsAuthoritativeSource(t *testing.T) {
@@ -606,4 +611,34 @@ func parseDate(value string, location *time.Location) loan.Date {
 		panic(err)
 	}
 	return date
+}
+
+func TestPositionServiceBuildsDisplayScheduleForNonReconstructedSources(t *testing.T) {
+	location := time.FixedZone("Jakarta", 7*60*60)
+	asOf := parseDate("2026-09-13", location)
+	for _, test := range []struct {
+		name     string
+		evidence []loan.ContractualInstallmentEvidence
+		wantRows int
+	}{
+		{name: "valid evidence", evidence: []loan.ContractualInstallmentEvidence{{Number: 0, RawDueDate: "2026-01-05"}, {Number: 2, RawDueDate: "2026-03-05 00:00:00"}, {Number: 1, RawDueDate: "2026-02-05"}}, wantRows: 2},
+		{name: "unusable evidence does not fail inquiry", evidence: []loan.ContractualInstallmentEvidence{{Number: 1, RawDueDate: "bad"}}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			contract := loan.ContractData{PrimaryAccount: "3060020000000004", PlafondLimit: loan.MustMoney("1000"), TenorMonths: 2, FlatRatePercent: loan.MustMoney("12"), ContractScheduleEvidence: test.evidence}
+			dwh := &dwhFake{exact: loan.LoanPosition{LoanStartDate: parseDate("2026-01-05", location), Source: loan.SourceDWH}}
+			service, _ := NewService(&fincloudFake{contract: contract}, &msoFake{}, dwh, &snapshotFake{}, &calculatorFake{}, location)
+			service.now = func() time.Time { return parseDate("2026-09-14", location).Time(location).Add(12 * time.Hour) }
+			result, err := service.GetLoanPosition(context.Background(), contract.PrimaryAccount, asOf)
+			if err != nil || result.Position.Source != loan.SourceDWH || len(result.ContractualSchedule) != test.wantRows {
+				t.Fatalf("source=%s rows=%+v err=%v", result.Position.Source, result.ContractualSchedule, err)
+			}
+			if test.wantRows == 2 {
+				last := result.ContractualSchedule[1]
+				if result.ContractualSchedule[0].Installment.Format(2) != "510.00" || last.DueDate.String() != "2026-03-05" || !last.ScheduledBalance.IsZero() {
+					t.Fatalf("schedule=%+v", result.ContractualSchedule)
+				}
+			}
+		})
+	}
 }

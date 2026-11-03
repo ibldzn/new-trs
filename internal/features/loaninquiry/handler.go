@@ -157,7 +157,7 @@ func newResultView(resolved loan.ResolvedPosition, requestedAccount string, asOf
 			Outstanding: formatCurrency(resolved.Loan.PlafondLimit), Status: "DISBURSED",
 		})
 	}
-	if resolved.Position.Source == loan.SourceReconstructed {
+	if len(resolved.ContractualSchedule) > 0 {
 		paymentStatusByInstallment := make(map[int64]string, len(resolved.Loan.ContractScheduleEvidence))
 		for _, row := range resolved.Loan.ContractScheduleEvidence {
 			paymentStatusByInstallment[row.Number] = row.RawPaymentStatus
