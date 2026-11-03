@@ -25,7 +25,8 @@ frontend-build:
 
 build: frontend-build
 	mkdir -p bin
-	go build -o bin/trs ./cmd/app
+	go build -trimpath -o bin/trs ./cmd/app
+	go build -trimpath -o bin/migrate ./cmd/migrate
 
 test:
 	go test ./...
@@ -63,4 +64,4 @@ feature:
 verify: frontend-build
 	go vet ./...
 	go test ./...
-	go build -o /dev/null ./cmd/app
+	go build ./...

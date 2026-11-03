@@ -18,6 +18,7 @@ import (
 
 	"github.com/ibldzn/trs/internal/audit"
 	"github.com/ibldzn/trs/internal/loan"
+	"github.com/ibldzn/trs/internal/logging"
 )
 
 type positionService interface {
@@ -117,7 +118,7 @@ func (handler *Handler) contractual(writer http.ResponseWriter, request *http.Re
 		status, code := positionError(err)
 		outcome = code
 		if handler.logger != nil && status >= http.StatusInternalServerError {
-			handler.logger.ErrorContext(request.Context(), "API loan lookup failed", "error", err, "request_id", middleware.GetReqID(request.Context()))
+			handler.logger.ErrorContext(request.Context(), "API loan lookup failed", logging.Err(err), "request_id", middleware.GetReqID(request.Context()))
 		}
 		writeError(writer, status, code)
 		return
@@ -162,7 +163,7 @@ func (handler *Handler) audit(request *http.Request, account, primary string, as
 		CreatedAt: time.Now().UTC(),
 	}
 	if err := handler.appendAudit(request.Context(), event); err != nil && handler.logger != nil {
-		handler.logger.WarnContext(request.Context(), "append API loan lookup audit", "error", err)
+		handler.logger.WarnContext(request.Context(), "append API loan lookup audit", logging.Err(err))
 	}
 }
 

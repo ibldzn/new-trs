@@ -145,11 +145,29 @@ func TestAPIRouteIsolation(t *testing.T) {
 
 func testRouter(t *testing.T, service *fakeAuthentication, register func(chi.Router), registerAPI ...func(chi.Router)) (http.Handler, string) {
 	t.Helper()
+	var api func(chi.Router)
+	if len(registerAPI) != 0 {
+		api = registerAPI[0]
+	}
+	return testRouterWith(t, service, register, api, func(context.Context) error { return nil }, slog.New(slog.NewTextHandler(io.Discard, nil)))
+}
+
+func testRouterWithReadiness(t *testing.T, service *fakeAuthentication, register func(chi.Router), ready func(context.Context) error) (http.Handler, string) {
+	t.Helper()
+	return testRouterWith(t, service, register, nil, ready, slog.New(slog.NewTextHandler(io.Discard, nil)))
+}
+
+func testRouterWithLogger(t *testing.T, service *fakeAuthentication, register func(chi.Router), ready func(context.Context) error, logger *slog.Logger) (http.Handler, string) {
+	t.Helper()
+	return testRouterWith(t, service, register, nil, ready, logger)
+}
+
+func testRouterWith(t *testing.T, service *fakeAuthentication, register, registerAPI func(chi.Router), ready func(context.Context) error, logger *slog.Logger) (http.Handler, string) {
+	t.Helper()
 	renderer, err := render.New(webfiles.Files, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	errors := render.NewErrorResponder(renderer, "Test", logger)
 	cookies := browserauth.NewCookieManager("session", false, time.Hour)
 	authentication := browserauth.NewHTTP(service, renderer, cookies, "Test", logger, func(context.Context, audit.Event) error { return nil }, errors)
@@ -161,9 +179,25 @@ func testRouter(t *testing.T, service *fakeAuthentication, register func(chi.Rou
 	if err != nil {
 		t.Fatal(err)
 	}
-	dependencies := RouterDependencies{StaticFiles: staticFiles, Authentication: authentication, RegisterAuthenticated: register, Errors: errors}
-	if len(registerAPI) != 0 {
-		dependencies.RegisterAPI = registerAPI[0]
+	return NewRouter(RouterDependencies{StaticFiles: staticFiles, Authentication: authentication, RegisterAPI: registerAPI, RegisterAuthenticated: register, Ready: ready, Errors: errors, Logger: logger}), token
+}
+
+func TestReadinessReportsDependencyState(t *testing.T) {
+	service := &fakeAuthentication{}
+	router, _ := testRouter(t, service, nil)
+	ready := httptest.NewRecorder()
+	router.ServeHTTP(ready, httptest.NewRequest(http.MethodGet, "/ready", nil))
+	if ready.Code != http.StatusOK || service.resolved != 0 || ready.Body.String() != "{\"status\":\"ready\"}\n" {
+		t.Fatalf("ready status=%d body=%q resolved=%d", ready.Code, ready.Body.String(), service.resolved)
 	}
-	return NewRouter(dependencies), token
+}
+
+func TestReadinessFailureIsGeneric(t *testing.T) {
+	service := &fakeAuthentication{}
+	router, _ := testRouterWithReadiness(t, service, nil, func(context.Context) error { return context.DeadlineExceeded })
+	response := httptest.NewRecorder()
+	router.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/ready", nil))
+	if response.Code != http.StatusServiceUnavailable || response.Body.String() != "{\"status\":\"not ready\"}\n" || service.resolved != 0 {
+		t.Fatalf("status=%d body=%q resolved=%d", response.Code, response.Body.String(), service.resolved)
+	}
 }

@@ -182,7 +182,7 @@ func TestInactiveIdentityCannotLoginButReactivationCan(t *testing.T) {
 
 func integrationService(t *testing.T, database *sqlx.DB, authenticator fincloudAuthenticator) *Service {
 	t.Helper()
-	service, err := NewService(authenticator, user.NewRepository(database), access.NewRepository(database), auth.NewSessionRepository(database), time.Hour, 30*24*time.Hour, slog.Default())
+	service, err := NewService(authenticator, user.NewRepository(database), access.NewRepository(database), auth.NewSessionRepository(database), time.Hour, 30*24*time.Hour, slog.Default(), LockoutConfig{Window: 15 * time.Minute, MaxFailures: 5, Lockout: 15 * time.Minute})
 	if err != nil {
 		t.Fatal(err)
 	}

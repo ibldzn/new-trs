@@ -15,6 +15,7 @@ import (
 
 	"github.com/ibldzn/trs/internal/audit"
 	"github.com/ibldzn/trs/internal/loan"
+	"github.com/ibldzn/trs/internal/logging"
 )
 
 type PositionService interface {
@@ -268,18 +269,18 @@ func (manager *Manager) loop() {
 		}
 		release, lockLost, acquired, err := manager.store.AcquireLock(manager.root)
 		if err != nil {
-			manager.logger.Error("SLIK lock failed", "error", err)
+			manager.logger.Error("SLIK lock failed", logging.Err(err))
 		}
 		if acquired {
 			pollContext, stopPoll := context.WithTimeout(manager.root, 15*time.Second)
 			var job Job
 			var found bool
 			if err := manager.store.Recover(pollContext); err != nil {
-				manager.logger.Error("SLIK recovery failed", "error", err)
+				manager.logger.Error("SLIK recovery failed", logging.Err(err))
 			} else {
 				job, found, err = manager.store.ClaimNext(pollContext)
 				if err != nil {
-					manager.logger.Error("SLIK claim failed", "error", err)
+					manager.logger.Error("SLIK claim failed", logging.Err(err))
 				}
 			}
 			stopPoll()
@@ -328,7 +329,7 @@ func (manager *Manager) run(job Job, lockLost <-chan struct{}) {
 	canceled, err := manager.store.IsCanceled(check, job.ID)
 	stop()
 	if err != nil {
-		manager.logger.Error("SLIK cancellation check failed", "job_id", job.ID, "error", err)
+		manager.logger.Error("SLIK cancellation check failed", "job_id", job.ID, logging.Err(err))
 		return
 	}
 	if canceled {
@@ -379,7 +380,7 @@ func (manager *Manager) run(job Job, lockLost <-chan struct{}) {
 			failedAccount = account
 			failureReason = safeFailure(err)
 			cancel()
-			manager.logger.Error("SLIK account failed", "job_id", job.ID, "reason", failureReason, "error", err)
+			manager.logger.Error("SLIK account failed", "job_id", job.ID, "reason", failureReason, logging.Err(err))
 		})
 	}
 	date, err := loan.ParseDate(job.AsOf, time.UTC)
@@ -456,7 +457,7 @@ produce:
 	canceled, cancelErr := manager.store.IsCanceled(check, job.ID)
 	stop()
 	if cancelErr != nil {
-		manager.logger.Error("SLIK cancellation check failed", "job_id", job.ID, "error", cancelErr)
+		manager.logger.Error("SLIK cancellation check failed", "job_id", job.ID, logging.Err(cancelErr))
 		return
 	}
 	if canceled {
@@ -531,7 +532,7 @@ func (manager *Manager) finish(job Job, status, account, reason, output string, 
 		if output != "" {
 			_ = os.Remove(filepath.Join(manager.config.StorageDir, output))
 		}
-		manager.logger.Error("SLIK terminal update failed", "job_id", job.ID, "error", err)
+		manager.logger.Error("SLIK terminal update failed", "job_id", job.ID, logging.Err(err))
 		return
 	}
 	manager.logDone(job, status, started)
@@ -539,7 +540,7 @@ func (manager *Manager) finish(job Job, status, account, reason, output string, 
 		actor := audit.Identity{UserID: job.ActorID, Username: job.ActorUsername}
 		effective := audit.Identity{UserID: job.OwnerID, Username: job.OwnerUsername}
 		if err := manager.appendAudit(ctx, audit.Event{Attribution: audit.Attribution{Actor: &actor, Effective: &effective}, Action: audit.ActionReportingGenerate, Metadata: audit.ReportingMetadata{AsOf: job.AsOf, RowCount: int(job.TotalRows)}, CreatedAt: time.Now().UTC()}); err != nil {
-			manager.logger.Warn("SLIK audit append failed", "job_id", job.ID, "error", err)
+			manager.logger.Warn("SLIK audit append failed", "job_id", job.ID, logging.Err(err))
 		}
 	}
 }
@@ -561,7 +562,7 @@ func (manager *Manager) cleanup() {
 	defer cancel()
 	jobs, err := manager.store.Expired(ctx)
 	if err != nil {
-		manager.logger.Error("SLIK retention lookup failed", "error", err)
+		manager.logger.Error("SLIK retention lookup failed", logging.Err(err))
 		return
 	}
 	for _, job := range jobs {
@@ -577,14 +578,14 @@ func (manager *Manager) cleanup() {
 				continue
 			}
 			if err := os.Remove(filename); err != nil && !errors.Is(err, os.ErrNotExist) {
-				manager.logger.Error("SLIK retention removal failed", "job_id", job.ID, "error", err)
+				manager.logger.Error("SLIK retention removal failed", "job_id", job.ID, logging.Err(err))
 				removed = false
 				continue
 			}
 		}
 		if removed {
 			if err := manager.store.ClearFiles(ctx, job.ID); err != nil {
-				manager.logger.Error("SLIK retention metadata failed", "job_id", job.ID, "error", err)
+				manager.logger.Error("SLIK retention metadata failed", "job_id", job.ID, logging.Err(err))
 			}
 		}
 	}

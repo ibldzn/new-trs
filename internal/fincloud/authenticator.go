@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"strings"
 	"time"
+
+	"github.com/ibldzn/trs/internal/logging"
 )
 
 var ErrInvalidCredentials = errors.New("invalid Fincloud credentials")
@@ -133,7 +135,7 @@ func (authenticator *Authenticator) Authenticate(ctx context.Context, username, 
 	cleanupContext, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
 	defer cancel()
 	if err := authenticator.logout(cleanupContext, sessionID); err != nil {
-		authenticator.logger.WarnContext(ctx, "clean up temporary Fincloud authentication session", "error", err)
+		authenticator.logger.WarnContext(ctx, "clean up temporary Fincloud authentication session", logging.Err(err))
 	}
 	return nil
 }

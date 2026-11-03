@@ -10,6 +10,7 @@ import (
 
 	"github.com/ibldzn/trs/internal/audit"
 	"github.com/ibldzn/trs/internal/loan"
+	"github.com/ibldzn/trs/internal/logging"
 )
 
 type source interface {
@@ -70,7 +71,7 @@ func (service *Service) Refresh(ctx context.Context, trigger Trigger, attributio
 		_ = service.store.MarkFailure(failureContext, service.now(), summary)
 		service.audit(failureContext, audit.Event{Attribution: attribution, Action: audit.ActionSnapshotRefreshFailed, Metadata: audit.SnapshotRefreshMetadata{Trigger: string(trigger), Error: summary}, CreatedAt: service.now()})
 		cancel()
-		service.logger.ErrorContext(ctx, "current snapshot refresh failed", "trigger", trigger, "error", err)
+		service.logger.ErrorContext(ctx, "current snapshot refresh failed", "trigger", trigger, logging.Err(err))
 		return 0, err
 	}
 	service.audit(ctx, audit.Event{Attribution: attribution, Action: audit.ActionSnapshotRefreshSucceeded, Metadata: audit.SnapshotRefreshMetadata{Trigger: string(trigger), RowCount: len(rows)}, CreatedAt: service.now()})
@@ -101,7 +102,7 @@ func (service *Service) audit(ctx context.Context, event audit.Event) {
 		return
 	}
 	if err := service.appendAudit(ctx, event); err != nil {
-		service.logger.WarnContext(ctx, "append snapshot audit", "action", event.Action, "error", err)
+		service.logger.WarnContext(ctx, "append snapshot audit", "action", event.Action, logging.Err(err))
 	}
 }
 

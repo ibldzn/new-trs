@@ -13,6 +13,7 @@ import (
 	"github.com/ibldzn/trs/internal/audit"
 	"github.com/ibldzn/trs/internal/auth"
 	"github.com/ibldzn/trs/internal/fincloud"
+	"github.com/ibldzn/trs/internal/logging"
 	"github.com/ibldzn/trs/internal/render"
 )
 
@@ -90,8 +91,10 @@ func (handler *HTTP) Login(writer http.ResponseWriter, request *http.Request) {
 	}
 
 	result, err := handler.service.Login(request.Context(), LoginInput{Username: form.Username, Password: password, LocationID: form.SelectedLocation, RoleID: form.SelectedRole, RememberMe: form.RememberMe}, time.Now().UTC())
-	if errors.Is(err, ErrInvalidCredentials) || errors.Is(err, ErrInactiveUser) {
-		handler.appendBestEffortAudit(request, audit.Event{Action: audit.ActionAuthLoginFailed, Metadata: audit.LoginFailedMetadata{Username: form.Username}, CreatedAt: time.Now().UTC()})
+	if errors.Is(err, ErrInvalidCredentials) || errors.Is(err, ErrInactiveUser) || errors.Is(err, errLoginThrottled) {
+		if !errors.Is(err, errLoginThrottled) {
+			handler.appendBestEffortAudit(request, audit.Event{Action: audit.ActionAuthLoginFailed, Metadata: audit.LoginFailedMetadata{Username: form.Username}, CreatedAt: time.Now().UTC()})
+		}
 		form.Errors["credentials"] = "Authentication failed. Check your Fincloud credentials, location, role, and THOR access."
 		if handler.loadLabels(writer, request, &form) {
 			handler.renderLogin(writer, request, http.StatusUnprocessableEntity, form)
@@ -149,7 +152,7 @@ func (handler *HTTP) appendBestEffortAudit(request *http.Request, event audit.Ev
 		return
 	}
 	if err := handler.appendAudit(request.Context(), event); err != nil {
-		handler.logger.WarnContext(request.Context(), "append authentication audit", "request_id", middleware.GetReqID(request.Context()), "method", request.Method, "path", request.URL.Path, "action", event.Action, "error", err)
+		handler.logger.WarnContext(request.Context(), "append authentication audit", "request_id", middleware.GetReqID(request.Context()), "method", request.Method, "path", request.URL.Path, "action", event.Action, logging.Err(err))
 	}
 }
 

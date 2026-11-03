@@ -1,0 +1,29 @@
+[Unit]
+Description=THOR Rate Sync
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=trs
+Group=trs
+WorkingDirectory=/opt/trs
+EnvironmentFile=/etc/trs/trs.env
+ExecStart=/opt/trs/bin/trs serve
+Restart=on-failure
+RestartSec=5s
+KillSignal=SIGTERM
+TimeoutStopSec=60s
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectHome=true
+ProtectSystem=strict
+# SLIK_STORAGE_DIR must live under here.
+ReadWritePaths=/opt/trs/data
+RestrictSUIDSGID=true
+UMask=0077
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

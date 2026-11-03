@@ -161,3 +161,25 @@ func TestNavigationMatchModes(t *testing.T) {
 		t.Fatal("query string changed active route matching")
 	}
 }
+
+func TestNavigationAnyPermissions(t *testing.T) {
+	item := Item{Key: "reports", Label: "Reports", Path: "/reports", AnyPermissions: []string{permissionReports, permissionCustomers}, Match: MatchPrefix}
+	registry, err := NewRegistry([]Group{{Key: "operations", Label: "Operations", Items: []Item{item}}}, testPermissions())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := registry.Prepare("/", func(key string) bool { return key == permissionCustomers }); len(got) != 1 || got[0].Items[0].Key != "reports" {
+		t.Fatalf("one matching permission must show item: %+v", got)
+	}
+	if got := registry.Prepare("/", func(key string) bool { return key == permissionDashboard }); len(got) != 0 {
+		t.Fatalf("no matching permission must hide item: %+v", got)
+	}
+	for name, bad := range map[string]Item{
+		"combined": {Key: "x", Label: "X", Path: "/x", Permission: permissionReports, AnyPermissions: []string{permissionCustomers}, Match: MatchExact},
+		"unknown":  {Key: "x", Label: "X", Path: "/x", AnyPermissions: []string{"missing.view"}, Match: MatchExact},
+	} {
+		if _, err := NewRegistry([]Group{{Key: "g", Label: "G", Items: []Item{bad}}}, testPermissions()); err == nil {
+			t.Fatalf("%s permission mode accepted", name)
+		}
+	}
+}

@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"log/slog"
@@ -14,12 +15,15 @@ import (
 	"github.com/ibldzn/trs/internal/api"
 	"github.com/ibldzn/trs/internal/audit"
 	"github.com/ibldzn/trs/internal/auth"
+	"github.com/ibldzn/trs/internal/branding"
 	"github.com/ibldzn/trs/internal/browserauth"
 	"github.com/ibldzn/trs/internal/config"
 	"github.com/ibldzn/trs/internal/contractual"
 	"github.com/ibldzn/trs/internal/database"
+	"github.com/ibldzn/trs/internal/dbschema"
 	"github.com/ibldzn/trs/internal/dwh"
 	"github.com/ibldzn/trs/internal/fincloud"
+	"github.com/ibldzn/trs/internal/logging"
 	corelps "github.com/ibldzn/trs/internal/lps"
 	"github.com/ibldzn/trs/internal/mso"
 	"github.com/ibldzn/trs/internal/platform/adminshell"
@@ -46,12 +50,9 @@ func Run(ctx context.Context) error {
 		return fmt.Errorf("load business timezone: %w", err)
 	}
 
-	logger := NewLogger(applicationConfig.App.Environment)
+	logger := NewLogger(applicationConfig.App.Name, applicationConfig.App.Environment)
 	slog.SetDefault(logger)
-	logger.Info("application starting",
-		"name", applicationConfig.App.Name,
-		"environment", applicationConfig.App.Environment,
-	)
+	logger.Info("application starting", "event", "app.starting")
 
 	databaseContext, cancel := context.WithTimeout(ctx, 5*time.Second)
 	databaseConnection, err := database.Open(databaseContext, applicationConfig.Database)
@@ -61,14 +62,24 @@ func Run(ctx context.Context) error {
 	}
 	defer func() {
 		if err := databaseConnection.Close(); err != nil {
-			logger.Error("close database", "error", err)
+			logger.Error("close database", logging.Err(err))
 		}
 	}()
-	logger.Info("database connection initialized",
+	logger.Info("database connection initialized", "event", "app.database.connected",
+		"network", applicationConfig.Database.Network,
 		"host", applicationConfig.Database.Host,
 		"port", applicationConfig.Database.Port,
+		"socket", applicationConfig.Database.Socket,
 		"database", applicationConfig.Database.Name,
 	)
+	schemaContext, cancel := context.WithTimeout(ctx, 10*time.Second)
+	err = dbschema.VerifyRuntime(schemaContext, databaseConnection)
+	cancel()
+	if err != nil {
+		return fmt.Errorf("verify database schema: %w", err)
+	}
+	// Background work outlives the signal so in-flight requests can drain first.
+	runtimeContext := context.WithoutCancel(ctx)
 	externalContext, cancel := context.WithTimeout(ctx, 10*time.Second)
 	dwhDatabase, err := database.OpenDSN(externalContext, applicationConfig.DWH.DSN, location)
 	cancel()
@@ -104,7 +115,7 @@ func Run(ctx context.Context) error {
 	defer func() {
 		closeContext, closeCancel := context.WithTimeout(context.Background(), 5*time.Second)
 		if err := fincloudClient.Close(closeContext); err != nil {
-			logger.Warn("close Fincloud session", "error", err)
+			logger.Warn("close Fincloud session", logging.Err(err))
 		}
 		closeCancel()
 	}()
@@ -128,11 +139,12 @@ func Run(ctx context.Context) error {
 		applicationConfig.Session.Lifetime,
 		applicationConfig.Session.RememberLifetime,
 		logger,
+		browserauth.LockoutConfig{Window: applicationConfig.Auth.LoginFailureWindow, MaxFailures: applicationConfig.Auth.LoginMaxFailures, Lockout: applicationConfig.Auth.LoginLockout},
 	)
 	if err != nil {
 		return fmt.Errorf("initialize browser authentication: %w", err)
 	}
-	cleanupContext, stopCleanup := context.WithCancel(ctx)
+	cleanupContext, stopCleanup := context.WithCancel(runtimeContext)
 	cleanupDone := make(chan struct{})
 	go func() {
 		defer close(cleanupDone)
@@ -158,6 +170,10 @@ func Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("initialize static files: %w", err)
 	}
+	brandingHandler, err := branding.New(applicationConfig.App.Name, applicationConfig.App.LogoFile, applicationConfig.App.WideLogoFile, applicationConfig.App.FaviconFile)
+	if err != nil {
+		return fmt.Errorf("initialize branding: %w", err)
+	}
 	errorResponder := render.NewErrorResponder(renderer, applicationConfig.App.Name, logger)
 	appendAudit := func(ctx context.Context, event audit.Event) error {
 		return audit.Append(ctx, databaseConnection, event)
@@ -172,7 +188,7 @@ func Run(ctx context.Context) error {
 	if err != nil {
 		return fmt.Errorf("initialize position service: %w", err)
 	}
-	slikManager, err := slik.NewManager(ctx, slik.NewRepository(databaseConnection), positionService,
+	slikManager, err := slik.NewManager(runtimeContext, slik.NewRepository(databaseConnection), positionService,
 		slik.Config{Concurrency: applicationConfig.SLIK.Concurrency, MaxUploadBytes: applicationConfig.SLIK.MaxUploadBytes, StorageDir: applicationConfig.SLIK.StorageDir}, appendAudit, logger)
 	if err != nil {
 		return fmt.Errorf("initialize SLIK: %w", err)
@@ -202,12 +218,14 @@ func Run(ctx context.Context) error {
 		return fmt.Errorf("initialize admin navigation: %w", err)
 	}
 	adminHTTP := adminshell.New(renderer, navigationRegistry, applicationConfig.App.Name, errorResponder)
+	adminHTTP.SetWideLogo(brandingHandler.HasWideLogo())
 	var registerAPI func(chi.Router)
 	if applicationConfig.APIKey != "" {
 		registerAPI = api.NewHandler(positionService, location, applicationConfig.APIKey, appendAudit, logger).RegisterRoutes
 	}
 	handler := server.NewRouter(server.RouterDependencies{
 		StaticFiles:    staticFiles,
+		Branding:       brandingHandler,
 		Authentication: authenticationHTTP,
 		RegisterAPI:    registerAPI,
 		RegisterAuthenticated: func(router chi.Router) {
@@ -218,9 +236,16 @@ func Run(ctx context.Context) error {
 				lpsDefaultCode: applicationConfig.LPS.DefaultParticipantCode, appendAudit: appendAudit, logger: logger,
 			})
 		},
+		Ready: func(ctx context.Context) error {
+			if err := databaseConnection.PingContext(ctx); err != nil {
+				return err
+			}
+			return dbschema.VerifyRuntime(ctx, databaseConnection)
+		},
 		Errors: errorResponder,
+		Logger: logger,
 	})
-	schedulerContext, stopScheduler := context.WithCancel(ctx)
+	schedulerContext, stopScheduler := context.WithCancel(runtimeContext)
 	schedulerDone := make(chan struct{})
 	go func() {
 		defer close(schedulerDone)
@@ -228,12 +253,34 @@ func Run(ctx context.Context) error {
 	}()
 	defer func() { stopScheduler(); <-schedulerDone }()
 	httpServer := server.NewHTTPServer(applicationConfig.App.Address(), handler, logger)
-	return httpServer.Run(ctx)
+	serveDone := make(chan error, 1)
+	go func() { serveDone <- httpServer.Serve() }()
+	logger.Info("application started", "event", "app.started", "address", applicationConfig.App.Address())
+
+	var serveErr error
+	select {
+	case serveErr = <-serveDone:
+	case <-ctx.Done():
+	}
+	logger.Info("application stopping", "event", "app.stopping")
+	shutdownStarted := time.Now()
+	shutdownContext, cancel := context.WithTimeout(context.Background(), applicationConfig.App.ShutdownTimeout)
+	defer cancel()
+	shutdownErr := httpServer.Shutdown(shutdownContext)
+	if shutdownErr != nil {
+		_ = httpServer.Close()
+	}
+	if serveErr == nil {
+		select {
+		case serveErr = <-serveDone:
+		default:
+		}
+	}
+	// Deferred stops (scheduler, SLIK workers, session cleanup, Fincloud logout) run after the HTTP drain.
+	logger.Info("http drained", "event", "app.http.drained", "duration_ms", time.Since(shutdownStarted).Milliseconds())
+	return errors.Join(serveErr, shutdownErr)
 }
 
-func NewLogger(environment string) *slog.Logger {
-	if environment == "development" {
-		return slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
-	}
-	return slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+func NewLogger(service, environment string) *slog.Logger {
+	return logging.New(os.Stdout, service, environment)
 }

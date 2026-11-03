@@ -8,3 +8,5 @@ data/slik/
 *.log
 web/static/js/*.map
 /ETF_REWRITE_TECHNICAL_REQUIREMENTS.md
+output/
+var/

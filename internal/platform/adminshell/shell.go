@@ -14,11 +14,13 @@ type Shell struct {
 	registry *navigation.Registry
 	appName  string
 	errors   *render.ErrorResponder
+	wideLogo bool
 }
 
 type PageData struct {
 	Title       string
 	AppName     string
+	WideLogo    bool
 	Principal   browserauth.Principal
 	Navigation  []navigation.GroupView
 	CurrentPath string
@@ -30,7 +32,15 @@ func New(renderer *render.Renderer, registry *navigation.Registry, appName strin
 	return &Shell{renderer: renderer, registry: registry, appName: appName, errors: errorResponder}
 }
 
+// SetWideLogo makes the expanded sidebar show /branding/logo-wide in place of
+// the app name.
+func (handler *Shell) SetWideLogo(wide bool) { handler.wideLogo = wide }
+
 func (handler *Shell) RequirePermission(permission string) func(http.Handler) http.Handler {
+	return handler.RequireAnyPermission(permission)
+}
+
+func (handler *Shell) RequireAnyPermission(permissions ...string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
 			principal, ok := browserauth.CurrentPrincipal(request.Context())
@@ -38,11 +48,13 @@ func (handler *Shell) RequirePermission(permission string) func(http.Handler) ht
 				handler.errors.Internal(writer, request, "permission middleware", errors.New("principal missing from request context"))
 				return
 			}
-			if !principal.Can(permission) {
-				handler.RenderPage(writer, request, http.StatusForbidden, "forbidden", "Forbidden", nil)
-				return
+			for _, permission := range permissions {
+				if principal.Can(permission) {
+					next.ServeHTTP(writer, request)
+					return
+				}
 			}
-			next.ServeHTTP(writer, request)
+			handler.RenderPage(writer, request, http.StatusForbidden, "forbidden", "Forbidden", nil)
 		})
 	}
 }
@@ -66,6 +78,7 @@ func (handler *Shell) PageData(request *http.Request, title string, data any) (P
 	return PageData{
 		Title:       title,
 		AppName:     handler.appName,
+		WideLogo:    handler.wideLogo,
 		Principal:   principal,
 		Navigation:  handler.registry.Prepare(request.URL.Path, principal.Can),
 		CurrentPath: request.URL.Path,

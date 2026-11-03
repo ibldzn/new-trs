@@ -13,6 +13,7 @@ import (
 	"github.com/ibldzn/trs/internal/audit"
 	"github.com/ibldzn/trs/internal/browserauth"
 	"github.com/ibldzn/trs/internal/loan"
+	"github.com/ibldzn/trs/internal/logging"
 	"github.com/ibldzn/trs/internal/platform/adminshell"
 )
 
@@ -123,7 +124,7 @@ func (handler *Handler) auditInquiry(ctx context.Context, resolved loan.Resolved
 			Metadata: audit.LoanInquiryMetadata{AccountNumber: resolved.Position.AccountNumber, AsOf: asOf.String(), Source: string(resolved.Position.Source)}, CreatedAt: time.Now().UTC(),
 		}
 		if err := handler.appendAudit(ctx, event); err != nil && handler.logger != nil {
-			handler.logger.WarnContext(ctx, "append loan inquiry audit", "error", err)
+			handler.logger.WarnContext(ctx, "append loan inquiry audit", logging.Err(err))
 		}
 	}
 }

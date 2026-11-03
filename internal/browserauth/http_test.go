@@ -127,3 +127,24 @@ func newTestHTTP(t *testing.T, service authenticationService) *HTTP {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	return NewHTTP(service, renderer, NewCookieManager("test_session", false, 30*24*time.Hour), "THOR", logger, nil, render.NewErrorResponder(renderer, "THOR", logger))
 }
+
+func TestThrottledLoginLooksLikeBadCredentialsWithoutAudit(t *testing.T) {
+	renderer, err := render.New(webfiles.Files, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	var actions []audit.Action
+	appendAudit := func(_ context.Context, event audit.Event) error { actions = append(actions, event.Action); return nil }
+	for _, test := range []struct {
+		err       error
+		wantAudit int
+	}{{ErrInvalidCredentials, 1}, {errLoginThrottled, 0}} {
+		actions = nil
+		handler := NewHTTP(&fakeHTTPService{err: test.err}, renderer, NewCookieManager("test_session", false, time.Hour), "THOR", logger, appendAudit, render.NewErrorResponder(renderer, "THOR", logger))
+		response := postLogin(handler, validLoginForm("secret"))
+		if response.Code != http.StatusUnprocessableEntity || !strings.Contains(response.Body.String(), "Authentication failed.") || len(actions) != test.wantAudit {
+			t.Fatalf("err=%v status=%d audits=%v", test.err, response.Code, actions)
+		}
+	}
+}

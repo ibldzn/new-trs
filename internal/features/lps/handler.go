@@ -13,6 +13,7 @@ import (
 	"github.com/ibldzn/trs/internal/audit"
 	"github.com/ibldzn/trs/internal/browserauth"
 	"github.com/ibldzn/trs/internal/loan"
+	"github.com/ibldzn/trs/internal/logging"
 	corelps "github.com/ibldzn/trs/internal/lps"
 	"github.com/ibldzn/trs/internal/platform/adminshell"
 )
@@ -96,7 +97,7 @@ func (handler *Handler) Generate(writer http.ResponseWriter, request *http.Reque
 			Metadata: audit.LPSMetadata{ParticipantCode: input.ParticipantCode, ReportingDate: input.ReportingDate, RowCount: result.DNRows + result.DSNRows + result.DKRows}, CreatedAt: time.Now().UTC(),
 		})
 		if err != nil && handler.logger != nil {
-			handler.logger.WarnContext(request.Context(), "append LPS audit", "error", err)
+			handler.logger.WarnContext(request.Context(), "append LPS audit", logging.Err(err))
 		}
 	}
 	writer.Header().Set("Content-Type", "application/zip")

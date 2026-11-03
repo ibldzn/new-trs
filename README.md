@@ -75,7 +75,20 @@ make migrate
 make migrate-status
 ```
 
-Production binary: `bin/trs`.
+Production binaries: `bin/trs` and `bin/migrate`. In production, `migrate up` requires `--confirm-database <DB_NAME>` and `migrate down` is disabled.
+
+## Operations
+
+- Startup refuses to serve until every embedded migration is applied. `/health` is liveness; `/ready` checks the application database and schema.
+- SIGTERM drains HTTP for up to `APP_SHUTDOWN_TIMEOUT` (default 45s) before stopping background work.
+- Logs are structured JSON on stdout outside development and never include error messages or raw paths. See [Observability](docs/OBSERVABILITY.md) and [Production operation](docs/PRODUCTION.md).
+- `APP_LOGO_FILE`, `APP_LOGO_WIDE_FILE`, and `APP_FAVICON_FILE` optionally brand the sidebar and favicon; empty values use a letter badge from `APP_NAME`.
+
+## Browser security
+
+- CSP allows only self-hosted scripts, styles, images, fonts, and connections; inline scripts and eval are disabled via Alpine's CSP build. Register Alpine components with `Alpine.data(...)` in `web/src/js/app.js` instead of inline `x-data` objects.
+- Shared component classes (`.card`, `.page-title`, `.link`, `.input`, `.alert-error`, `.btn`, `.btn-primary`, `.btn-secondary`, `.btn-danger`, `.btn-danger-outline`, `.btn-sm`, `.btn-xs`) live in `web/src/css/app.css`.
+- Failed Fincloud logins are throttled per case-folded username in process memory (`AUTH_LOGIN_*`). Locked attempts never reach Fincloud and are not audited. Per-IP limits remain an edge responsibility.
 
 ## Data rules
 

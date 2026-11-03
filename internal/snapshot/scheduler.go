@@ -6,6 +6,7 @@ import (
 	"time"
 
 	"github.com/ibldzn/trs/internal/audit"
+	"github.com/ibldzn/trs/internal/logging"
 )
 
 func RunScheduler(ctx context.Context, service *Service, interval time.Duration, refreshOnStart bool, logger *slog.Logger) {
@@ -13,7 +14,7 @@ func RunScheduler(ctx context.Context, service *Service, interval time.Duration,
 		refreshContext, cancel := context.WithTimeout(ctx, 30*time.Minute)
 		defer cancel()
 		if _, err := service.Refresh(refreshContext, trigger, audit.Attribution{}); err != nil && ctx.Err() == nil && err != ErrRefreshInProgress {
-			logger.ErrorContext(ctx, "current snapshot refresh failed", "trigger", trigger, "error", err)
+			logger.ErrorContext(ctx, "current snapshot refresh failed", "trigger", trigger, logging.Err(err))
 		}
 	}
 	if refreshOnStart {

@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	"github.com/ibldzn/trs/internal/app"
+	"github.com/ibldzn/trs/internal/logging"
 )
 
 func main() {
@@ -17,7 +18,7 @@ func main() {
 	defer stop()
 
 	if err := run(ctx, os.Args[1:], os.Stdin, os.Stdout, os.Stderr); err != nil {
-		slog.Error("application stopped", "error", err)
+		slog.Error("application stopped", logging.Err(err))
 		os.Exit(1)
 	}
 }

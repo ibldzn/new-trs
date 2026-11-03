@@ -16,6 +16,7 @@ import (
 type fakeAuthenticator struct {
 	username, password, location, role string
 	err                                error
+	calls                              int
 }
 
 func (*fakeAuthenticator) Labels(context.Context) (fincloud.AuthLabels, error) {
@@ -23,6 +24,7 @@ func (*fakeAuthenticator) Labels(context.Context) (fincloud.AuthLabels, error) {
 }
 func (fake *fakeAuthenticator) Authenticate(_ context.Context, username, password, location, role string) error {
 	fake.username, fake.password, fake.location, fake.role = username, password, location, role
+	fake.calls++
 	return fake.err
 }
 
@@ -65,9 +67,11 @@ func (fake *fakeSessions) FindValidByTokenHash(context.Context, [32]byte, time.T
 func (*fakeSessions) UpdateLastSeenAt(context.Context, uint64, time.Time) error { return nil }
 func (*fakeSessions) Revoke(context.Context, [32]byte) error                    { return nil }
 
+var testLockout = LockoutConfig{Window: 15 * time.Minute, MaxFailures: 5, Lockout: 15 * time.Minute}
+
 func testService(t *testing.T, authenticator *fakeAuthenticator, users *fakeUsers, permissions *fakePermissions, sessions *fakeSessions) *Service {
 	t.Helper()
-	service, err := NewService(authenticator, users, permissions, sessions, time.Hour, 24*time.Hour, slog.Default())
+	service, err := NewService(authenticator, users, permissions, sessions, time.Hour, 24*time.Hour, slog.Default(), testLockout)
 	if err != nil {
 		t.Fatal(err)
 	}

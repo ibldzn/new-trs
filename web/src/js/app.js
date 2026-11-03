@@ -1,4 +1,4 @@
-import Alpine from "alpinejs";
+import Alpine from "@alpinejs/csp";
 import htmx from "htmx.org";
 import {
   ChevronDown,
@@ -7,22 +7,33 @@ import {
   FileArchive,
   FileSpreadsheet,
   Landmark,
+  createIcons,
   LayoutDashboard,
   LogOut,
   Menu,
+  Monitor,
+  Moon,
   PanelLeftClose,
   ScrollText,
   Shield,
   ShieldCheck,
+  Sun,
   UserRound,
-  UserShield,
   Users,
+  UserShield,
   X,
-  createIcons,
 } from "lucide";
 
 window.Alpine = Alpine;
 window.htmx = htmx;
+htmx.config.allowEval = false;
+htmx.config.allowScriptTags = false;
+htmx.config.includeIndicatorStyles = false;
+
+Alpine.data("noticeToast", () => ({
+  open: true,
+  init() { setTimeout(() => { this.open = false; }, 5000); },
+}));
 
 const root = document.documentElement;
 const systemTheme = window.matchMedia("(prefers-color-scheme: dark)");
@@ -47,7 +58,7 @@ Alpine.store("theme", {
     this.preference = preference;
     try {
       localStorage.setItem("theme", preference);
-    } catch { }
+    } catch {}
     applyTheme(preference);
   },
 });
@@ -67,7 +78,7 @@ Alpine.data("adminShell", () => ({
     root.dataset.sidebarCollapsed = String(this.sidebarCollapsed);
     try {
       localStorage.setItem("sidebar-collapsed", String(this.sidebarCollapsed));
-    } catch { }
+    } catch {}
   },
   expandSidebar() {
     if (!this.sidebarCollapsed) return;
@@ -75,7 +86,7 @@ Alpine.data("adminShell", () => ({
     root.dataset.sidebarCollapsed = "false";
     try {
       localStorage.setItem("sidebar-collapsed", "false");
-    } catch { }
+    } catch {}
   },
   closeMobile() {
     this.mobileOpen = false;
@@ -94,6 +105,10 @@ Alpine.data("navigationDisclosure", () => ({
   get open() {
     return this.active || this.manualOpen;
   },
+  togglePrimary() {
+    if (this.sidebarCollapsed) { this.expandSidebar(); this.openDisclosure(); }
+    else this.toggleDisclosure();
+  },
   openDisclosure() {
     if (this.active || this.manualOpen) return;
     this.manualOpen = true;
@@ -108,7 +123,7 @@ Alpine.data("navigationDisclosure", () => ({
     sidebarDisclosures[this.key] = this.manualOpen;
     try {
       localStorage.setItem("sidebar-disclosures", JSON.stringify(sidebarDisclosures));
-    } catch { }
+    } catch {}
   },
 }));
 
@@ -120,7 +135,7 @@ Alpine.data("confirmationDialog", () => ({
   confirmLabel: "Confirm",
   open(event) {
     this.form = event.detail.form;
-    this.trigger = event.detail.trigger;
+    this.trigger = document.getElementById(this.form.dataset.confirmCancelFocus || "") || event.detail.trigger;
     this.title = this.form.dataset.confirmTitle || "Confirm action";
     this.message = this.form.dataset.confirmMessage || "Are you sure?";
     this.confirmLabel = this.form.dataset.confirmLabel || "Confirm";
@@ -132,6 +147,8 @@ Alpine.data("confirmationDialog", () => ({
   },
   confirm() {
     const form = this.form;
+    const successFocus = document.getElementById(form.dataset.confirmSuccessFocus || "");
+    if (successFocus) this.trigger = successFocus;
     this.$refs.dialog.close();
     form.dataset.confirmed = "true";
     form.requestSubmit();
@@ -153,28 +170,13 @@ document.addEventListener("submit", (event) => {
 
 const initializeIcons = () =>
   createIcons({
-    icons: {
-      ChevronDown,
-      CircleCheckBig,
-      DatabaseZap,
-      FileArchive,
-      FileSpreadsheet,
-      Landmark,
-      LayoutDashboard,
-      LogOut,
-      Menu,
-      PanelLeftClose,
-      ScrollText,
-      Shield,
-      ShieldCheck,
-      UserRound,
-      UserShield,
-      Users,
-      X
-    },
+    icons: { ChevronDown, CircleCheckBig, DatabaseZap, FileArchive, FileSpreadsheet, Landmark, LayoutDashboard, LogOut, Menu, Monitor, Moon, PanelLeftClose, ScrollText, Shield, ShieldCheck, Sun, UserRound, UserShield, Users, X },
   });
 
-document.addEventListener("DOMContentLoaded", initializeIcons);
+// Icons must exist before Alpine binds: Lucide replaces <i> with a new <svg>
+// carrying over Alpine-added classes (e.g. rotate-180) that Alpine then never
+// removes. The script is deferred, so the DOM is already parsed here.
+initializeIcons();
 document.body.addEventListener("htmx:afterSwap", initializeIcons);
 
 Alpine.start();

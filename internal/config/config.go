@@ -3,6 +3,7 @@ package config
 import (
 	"errors"
 	"fmt"
+	"net"
 	"net/url"
 	"os"
 	"strconv"
@@ -17,6 +18,7 @@ const (
 	defaultAppEnvironment          = "development"
 	defaultAppURL                  = "http://localhost:8080"
 	defaultAppPort                 = 8080
+	defaultAppShutdownTimeout      = 45 * time.Second
 	defaultAppTimezone             = "Asia/Jakarta"
 	defaultDatabaseHost            = "127.0.0.1"
 	defaultDatabasePort            = 3306
@@ -36,6 +38,7 @@ type Config struct {
 	BootstrapAccessManagers string
 	Database                DatabaseConfig
 	Session                 SessionConfig
+	Auth                    AuthConfig
 	DWH                     ExternalDatabaseConfig
 	MSO                     ExternalDatabaseConfig
 	Fincloud                FincloudConfig
@@ -48,14 +51,21 @@ type AppConfig struct {
 	Name        string
 	Environment string
 	URL         string
-	Port        int
-	Timezone    string
+	// BindHost empty listens on every interface.
+	BindHost        string
+	Port            int
+	ShutdownTimeout time.Duration
+	Timezone        string
+	// Branding image paths are optional; see internal/branding.
+	LogoFile     string
+	WideLogoFile string
+	FaviconFile  string
 }
 
 func (c AppConfig) Location() (*time.Location, error) { return time.LoadLocation(c.Timezone) }
 
 func (c AppConfig) Address() string {
-	return ":" + strconv.Itoa(c.Port)
+	return net.JoinHostPort(c.BindHost, strconv.Itoa(c.Port))
 }
 
 func (c AppConfig) IsDevelopment() bool {
@@ -63,11 +73,20 @@ func (c AppConfig) IsDevelopment() bool {
 }
 
 type DatabaseConfig struct {
+	Network  string
 	Host     string
 	Port     int
+	Socket   string
 	Name     string
 	User     string
 	Password string
+}
+
+// AuthConfig bounds failed browser logins per username before Fincloud is asked again.
+type AuthConfig struct {
+	LoginFailureWindow time.Duration
+	LoginMaxFailures   int
+	LoginLockout       time.Duration
 }
 
 type SessionConfig struct {
@@ -128,7 +147,27 @@ func parse(lookup lookupEnv) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	databasePort, err := parsePort("DB_PORT", value("DB_PORT", strconv.Itoa(defaultDatabasePort)))
+	databaseNetwork := strings.TrimSpace(value("DB_NETWORK", "tcp"))
+	databasePort := 0
+	if databaseNetwork == "tcp" {
+		databasePort, err = parsePort("DB_PORT", value("DB_PORT", strconv.Itoa(defaultDatabasePort)))
+		if err != nil {
+			return Config{}, err
+		}
+	}
+	shutdownTimeout, err := parseDuration("APP_SHUTDOWN_TIMEOUT", value("APP_SHUTDOWN_TIMEOUT", defaultAppShutdownTimeout.String()))
+	if err != nil {
+		return Config{}, err
+	}
+	maxFailures, err := parsePositiveInt("AUTH_LOGIN_MAX_FAILURES", value("AUTH_LOGIN_MAX_FAILURES", "5"), 1000)
+	if err != nil {
+		return Config{}, err
+	}
+	failureWindow, err := parseDuration("AUTH_LOGIN_FAILURE_WINDOW", value("AUTH_LOGIN_FAILURE_WINDOW", "15m"))
+	if err != nil {
+		return Config{}, err
+	}
+	lockout, err := parseDuration("AUTH_LOGIN_LOCKOUT", value("AUTH_LOGIN_LOCKOUT", "15m"))
 	if err != nil {
 		return Config{}, err
 	}
@@ -181,11 +220,17 @@ func parse(lookup lookupEnv) (Config, error) {
 		BootstrapAccessManagers: strings.TrimSpace(value("THOR_BOOTSTRAP_ACCESS_MANAGERS", "")),
 		App: AppConfig{
 			Name: strings.TrimSpace(value("APP_NAME", defaultAppName)), Environment: strings.TrimSpace(value("APP_ENV", defaultAppEnvironment)),
-			URL: strings.TrimSpace(value("APP_URL", defaultAppURL)), Port: appPort, Timezone: strings.TrimSpace(value("APP_TIMEZONE", defaultAppTimezone)),
+			URL: strings.TrimSpace(value("APP_URL", defaultAppURL)), BindHost: strings.TrimSpace(value("APP_BIND_HOST", "")), Port: appPort,
+			ShutdownTimeout: shutdownTimeout, Timezone: strings.TrimSpace(value("APP_TIMEZONE", defaultAppTimezone)),
+			LogoFile: strings.TrimSpace(value("APP_LOGO_FILE", "")), WideLogoFile: strings.TrimSpace(value("APP_LOGO_WIDE_FILE", "")),
+			FaviconFile: strings.TrimSpace(value("APP_FAVICON_FILE", "")),
 		},
+		Auth: AuthConfig{LoginFailureWindow: failureWindow, LoginMaxFailures: maxFailures, LoginLockout: lockout},
 		Database: DatabaseConfig{
+			Network:  databaseNetwork,
 			Host:     strings.TrimSpace(value("DB_HOST", defaultDatabaseHost)),
 			Port:     databasePort,
+			Socket:   strings.TrimSpace(value("DB_SOCKET", "")),
 			Name:     strings.TrimSpace(value("DB_NAME", "")),
 			User:     strings.TrimSpace(value("DB_USER", "")),
 			Password: value("DB_PASSWORD", ""),
@@ -224,7 +269,6 @@ func validate(config Config) error {
 		{"APP_NAME", config.App.Name},
 		{"APP_ENV", config.App.Environment},
 		{"APP_TIMEZONE", config.App.Timezone},
-		{"DB_HOST", config.Database.Host},
 		{"DB_NAME", config.Database.Name},
 		{"DB_USER", config.Database.User},
 		{"SESSION_COOKIE_NAME", config.Session.CookieName},
@@ -234,6 +278,19 @@ func validate(config Config) error {
 		if field.value == "" {
 			return fmt.Errorf("%s must not be empty", field.key)
 		}
+	}
+
+	switch config.Database.Network {
+	case "tcp":
+		if config.Database.Host == "" {
+			return fmt.Errorf("DB_HOST must not be empty")
+		}
+	case "unix":
+		if config.Database.Socket == "" {
+			return fmt.Errorf("DB_SOCKET must not be empty when DB_NETWORK=unix")
+		}
+	default:
+		return fmt.Errorf("DB_NETWORK must be one of tcp or unix")
 	}
 
 	switch config.App.Environment {

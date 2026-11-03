@@ -113,3 +113,12 @@ func TestSystemActorAudit(t *testing.T) {
 		t.Fatal("system actor combined with browser user")
 	}
 }
+
+func TestAppendRejectsOversizedMetadata(t *testing.T) {
+	executor := &recordingExecutor{}
+	event := Event{Attribution: Attribution{SystemActor: "system:api"}, Action: ActionAPILoanLookup, CreatedAt: time.Now(),
+		Metadata: APILoanLookupMetadata{RequestedAccount: strings.Repeat("x", MaxMetadataBytes), AsOf: "2026-09-14", Outcome: "success"}}
+	if err := Append(context.Background(), executor, event); err == nil || executor.args != nil {
+		t.Fatalf("oversized metadata accepted: err=%v args=%v", err, executor.args)
+	}
+}

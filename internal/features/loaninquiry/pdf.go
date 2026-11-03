@@ -11,6 +11,7 @@ import (
 	"codeberg.org/go-pdf/fpdf"
 
 	"github.com/ibldzn/trs/internal/loan"
+	"github.com/ibldzn/trs/internal/logging"
 )
 
 //go:embed assets/logo.png
@@ -69,7 +70,7 @@ func (handler *Handler) PDF(writer http.ResponseWriter, request *http.Request) {
 	document, err := generateLoanPDF(view, printedAt)
 	if err != nil {
 		if handler.logger != nil {
-			handler.logger.ErrorContext(request.Context(), "generate loan inquiry PDF", "error", err)
+			handler.logger.ErrorContext(request.Context(), "generate loan inquiry PDF", logging.Err(err))
 		}
 		http.Error(writer, http.StatusText(http.StatusInternalServerError), http.StatusInternalServerError)
 		return

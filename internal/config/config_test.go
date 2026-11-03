@@ -161,3 +161,78 @@ func mapLookup(values map[string]string) lookupEnv {
 		return value, ok
 	}
 }
+
+func TestParseDatabaseNetworks(t *testing.T) {
+	for _, network := range []string{"tcp", "unix"} {
+		t.Run(network, func(t *testing.T) {
+			values := baseValues("DB_NETWORK", network)
+			values["DB_HOST"] = "mysql.example.test"
+			values["DB_PORT"] = "3307"
+			values["DB_SOCKET"] = "/var/run/mysqld/mysqld.sock"
+			values["DB_PASSWORD"] = "secret"
+			got, err := parse(mapLookup(values))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got.Database.Network != network || got.Database.Socket != values["DB_SOCKET"] || got.Database.Name != "go_admin" || got.Database.User != "root" || got.Database.Password != "secret" {
+				t.Fatalf("unexpected database config: %+v", got.Database)
+			}
+			if network == "tcp" && (got.Database.Host != values["DB_HOST"] || got.Database.Port != 3307) {
+				t.Fatalf("unexpected TCP address: %+v", got.Database)
+			}
+		})
+	}
+}
+
+func TestParseDatabaseValidation(t *testing.T) {
+	tests := []struct{ network, key, value, want string }{
+		{"tcp", "DB_HOST", "", "DB_HOST"},
+		{"tcp", "DB_PORT", "", "DB_PORT"},
+		{"tcp", "DB_PORT", "mysql", "DB_PORT"},
+		{"tcp", "DB_PORT", "0", "DB_PORT"},
+		{"tcp", "DB_PORT", "65536", "DB_PORT"},
+		{"tcp", "DB_NAME", "", "DB_NAME"},
+		{"tcp", "DB_USER", "", "DB_USER"},
+		{"unix", "DB_SOCKET", "", "DB_SOCKET"},
+		{"unix", "DB_SOCKET", "   ", "DB_SOCKET"},
+		{"unix", "DB_NAME", "", "DB_NAME"},
+		{"unix", "DB_USER", "", "DB_USER"},
+		{"udp", "DB_NETWORK", "udp", "DB_NETWORK"},
+		{"", "DB_NETWORK", "", "DB_NETWORK"},
+	}
+	for _, test := range tests {
+		t.Run(test.network+"/"+test.key+"="+test.value, func(t *testing.T) {
+			values := baseValues("DB_NETWORK", test.network)
+			values["DB_SOCKET"] = "/var/run/mysqld/mysqld.sock"
+			values[test.key] = test.value
+			if _, err := parse(mapLookup(values)); err == nil || !strings.Contains(err.Error(), test.want) {
+				t.Fatalf("error=%v want %q", err, test.want)
+			}
+		})
+	}
+	values := baseValues("DB_NETWORK", "unix")
+	if _, err := parse(mapLookup(values)); err == nil || !strings.Contains(err.Error(), "DB_SOCKET") {
+		t.Fatalf("missing socket error=%v", err)
+	}
+}
+
+func TestLoginLockoutAndShutdownRequirePositiveBounds(t *testing.T) {
+	for _, key := range []string{"AUTH_LOGIN_MAX_FAILURES", "AUTH_LOGIN_FAILURE_WINDOW", "AUTH_LOGIN_LOCKOUT", "APP_SHUTDOWN_TIMEOUT"} {
+		for _, value := range []string{"0", "-1", "invalid"} {
+			if _, err := parse(mapLookup(baseValues(key, value))); err == nil || !strings.Contains(err.Error(), key) {
+				t.Fatalf("%s=%s: %v", key, value, err)
+			}
+		}
+	}
+}
+
+func TestAddressKeepsAllInterfacesByDefault(t *testing.T) {
+	got, err := parse(mapLookup(baseValues("", "")))
+	if err != nil || got.App.Address() != ":8080" || got.App.ShutdownTimeout != defaultAppShutdownTimeout {
+		t.Fatalf("address=%q shutdown=%s err=%v", got.App.Address(), got.App.ShutdownTimeout, err)
+	}
+	got, err = parse(mapLookup(baseValues("APP_BIND_HOST", "127.0.0.1")))
+	if err != nil || got.App.Address() != "127.0.0.1:8080" {
+		t.Fatalf("address=%q err=%v", got.App.Address(), err)
+	}
+}

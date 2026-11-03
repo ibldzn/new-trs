@@ -1,11 +1,28 @@
 {{define "theme-switcher"}}
-<label class="inline-flex items-center" x-data>
-    <span class="sr-only">Theme</span>
-    <select aria-label="Theme" x-model="$store.theme.preference" @change="$store.theme.set($event.target.value)"
-        class="rounded-lg border border-slate-300 bg-white px-2.5 py-2 text-sm text-slate-700 shadow-sm outline-none transition hover:bg-slate-50 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-200 dark:hover:bg-slate-800">
-        <option value="light">Light</option>
-        <option value="dark">Dark</option>
-        <option value="system">System</option>
-    </select>
-</label>
+{{/* Active state reads html[data-theme-preference] (set before paint by
+head-state-init), so the right option is highlighted without waiting for Alpine. */}}
+<fieldset x-data class="inline-flex items-center gap-0.5 rounded-full border border-slate-200 bg-slate-100 p-0.5 dark:border-slate-800 dark:bg-slate-900">
+    <legend class="sr-only">Theme</legend>
+    <label title="Light" class="cursor-pointer">
+        <input type="radio" name="theme" value="light" class="peer sr-only" x-model="$store.theme.preference" @change="$store.theme.set($event.target.value)">
+        <span class="grid size-7 place-items-center rounded-full text-slate-500 transition hover:text-slate-900 peer-focus-visible:ring-2 peer-focus-visible:ring-emerald-500/50 dark:text-slate-400 dark:hover:text-white in-data-[theme-preference=light]:bg-white in-data-[theme-preference=light]:text-amber-500! in-data-[theme-preference=light]:shadow-sm">
+            <i data-lucide="sun" class="size-4" aria-hidden="true"></i>
+            <span class="sr-only">Light</span>
+        </span>
+    </label>
+    <label title="Dark" class="cursor-pointer">
+        <input type="radio" name="theme" value="dark" class="peer sr-only" x-model="$store.theme.preference" @change="$store.theme.set($event.target.value)">
+        <span class="grid size-7 place-items-center rounded-full text-slate-500 transition hover:text-slate-900 peer-focus-visible:ring-2 peer-focus-visible:ring-emerald-500/50 dark:text-slate-400 dark:hover:text-white in-data-[theme-preference=dark]:bg-slate-700 in-data-[theme-preference=dark]:text-indigo-300! in-data-[theme-preference=dark]:shadow-sm">
+            <i data-lucide="moon" class="size-4" aria-hidden="true"></i>
+            <span class="sr-only">Dark</span>
+        </span>
+    </label>
+    <label title="System" class="cursor-pointer">
+        <input type="radio" name="theme" value="system" class="peer sr-only" x-model="$store.theme.preference" @change="$store.theme.set($event.target.value)">
+        <span class="grid size-7 place-items-center rounded-full text-slate-500 transition hover:text-slate-900 peer-focus-visible:ring-2 peer-focus-visible:ring-emerald-500/50 dark:text-slate-400 dark:hover:text-white in-data-[theme-preference=system]:bg-white in-data-[theme-preference=system]:text-emerald-600! in-data-[theme-preference=system]:shadow-sm dark:in-data-[theme-preference=system]:bg-slate-700 dark:in-data-[theme-preference=system]:text-emerald-400!">
+            <i data-lucide="monitor" class="size-4" aria-hidden="true"></i>
+            <span class="sr-only">System</span>
+        </span>
+    </label>
+</fieldset>
 {{end}}

@@ -12,6 +12,8 @@ import (
 
 type Action string
 
+const MaxMetadataBytes = 64 << 10
+
 const (
 	// Role, password, registration, and impersonation actions remain defined only
 	// so historical audit rows keep stable labels. Current runtime paths do not emit them.
@@ -184,6 +186,9 @@ func Append(ctx context.Context, executor sqlx.ExtContext, event Event) error {
 		encoded, err := json.Marshal(event.Metadata)
 		if err != nil {
 			return fmt.Errorf("encode audit metadata: %w", err)
+		}
+		if len(encoded) > MaxMetadataBytes {
+			return fmt.Errorf("audit metadata exceeds %d bytes", MaxMetadataBytes)
 		}
 		metadata = encoded
 	}

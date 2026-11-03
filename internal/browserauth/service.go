@@ -12,6 +12,7 @@ import (
 	"github.com/ibldzn/trs/internal/audit"
 	"github.com/ibldzn/trs/internal/auth"
 	"github.com/ibldzn/trs/internal/fincloud"
+	"github.com/ibldzn/trs/internal/logging"
 	"github.com/ibldzn/trs/internal/securityctx"
 	"github.com/ibldzn/trs/internal/user"
 )
@@ -58,6 +59,7 @@ type Service struct {
 	rememberLifetime time.Duration
 	generateToken    func() (string, error)
 	logger           *slog.Logger
+	failures         loginFailures
 }
 
 type LoginInput struct {
@@ -95,17 +97,20 @@ func auditAttributionFromPrincipal(principal Principal) audit.Attribution {
 	return audit.Attribution{Actor: &identity, Effective: &identity}
 }
 
-func NewService(authenticator fincloudAuthenticator, users userStore, permissions permissionStore, sessions sessionStore, lifetime, rememberLifetime time.Duration, logger *slog.Logger) (*Service, error) {
+func NewService(authenticator fincloudAuthenticator, users userStore, permissions permissionStore, sessions sessionStore, lifetime, rememberLifetime time.Duration, logger *slog.Logger, lockout LockoutConfig) (*Service, error) {
 	if authenticator == nil || users == nil || permissions == nil || sessions == nil {
 		return nil, fmt.Errorf("browser authentication dependencies are required")
 	}
 	if lifetime <= 0 || rememberLifetime <= 0 {
 		return nil, fmt.Errorf("session lifetimes must be positive")
 	}
+	if err := lockout.validate(); err != nil {
+		return nil, err
+	}
 	if logger == nil {
 		logger = slog.Default()
 	}
-	return &Service{authenticator: authenticator, users: users, permissions: permissions, sessions: sessions, lifetime: lifetime, rememberLifetime: rememberLifetime, generateToken: auth.GenerateToken, logger: logger}, nil
+	return &Service{authenticator: authenticator, users: users, permissions: permissions, sessions: sessions, lifetime: lifetime, rememberLifetime: rememberLifetime, generateToken: auth.GenerateToken, logger: logger, failures: newLoginFailures(lockout)}, nil
 }
 
 func (service *Service) Labels(ctx context.Context) (fincloud.AuthLabels, error) {
@@ -117,13 +122,20 @@ func (service *Service) Login(ctx context.Context, input LoginInput, now time.Ti
 	if fincloudUsername == "" || input.Password == "" || len(input.Password) > maxPasswordBytes || strings.TrimSpace(input.LocationID) == "" || strings.TrimSpace(input.RoleID) == "" {
 		return LoginResult{}, ErrInvalidCredentials
 	}
+	canonicalUsername := user.NormalizeUsername(fincloudUsername)
+	// Case-folded so case variants of one Fincloud account share a single failure counter.
+	throttleKey := strings.ToLower(canonicalUsername)
+	if service.failures.blocked(throttleKey, now) {
+		return LoginResult{}, errLoginThrottled
+	}
 	if err := service.authenticator.Authenticate(ctx, fincloudUsername, input.Password, input.LocationID, input.RoleID); err != nil {
 		if errors.Is(err, fincloud.ErrInvalidCredentials) {
+			service.failures.fail(throttleKey, now)
 			return LoginResult{}, ErrInvalidCredentials
 		}
 		return LoginResult{}, fmt.Errorf("authenticate with Fincloud: %w", err)
 	}
-	canonicalUsername := user.NormalizeUsername(fincloudUsername)
+	service.failures.clear(throttleKey)
 	if err := user.ValidateUsername(canonicalUsername); err != nil {
 		return LoginResult{}, fmt.Errorf("authenticated Fincloud username is not a valid THOR identity: %w", err)
 	}
@@ -148,7 +160,7 @@ func (service *Service) Login(ctx context.Context, input LoginInput, now time.Ti
 		return LoginResult{}, fmt.Errorf("create browser session: %w", err)
 	}
 	if err := service.users.UpdateLastLoginAt(ctx, found.ID, now); err != nil {
-		service.logger.WarnContext(ctx, "update last login", "user_id", found.ID, "error", err)
+		service.logger.WarnContext(ctx, "update last login", "user_id", found.ID, logging.Err(err))
 	}
 	return LoginResult{RawToken: rawToken, Session: session, User: found, Provisioned: provisioned}, nil
 }
@@ -176,7 +188,7 @@ func (service *Service) ResolveSession(ctx context.Context, tokenHash [32]byte, 
 	keys = append(keys, access.PermissionLoanInquiry)
 	if now.Sub(session.LastSeenAt) >= LastSeenTouchInterval {
 		if err := service.sessions.UpdateLastSeenAt(ctx, session.ID, now); err != nil {
-			service.logger.WarnContext(ctx, "update session activity", "session_id", session.ID, "error", err)
+			service.logger.WarnContext(ctx, "update session activity", "session_id", session.ID, logging.Err(err))
 		}
 	}
 	return Principal{UserID: found.ID, Username: found.Username, Name: found.Name, Permissions: access.NewPermissionSet(keys), SessionID: session.ID, RememberMe: session.RememberMe}, nil
